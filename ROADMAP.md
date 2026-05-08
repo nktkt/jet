@@ -16,12 +16,12 @@ The smallest thing that resembles a build tool. No network, no dependencies — 
 - [x] `--no-vcs` flag; default runs `git init --quiet`
 - [x] Project name validation (length, charset, Java keywords, Windows-reserved, build-tool reserved)
 - [x] Hyphen-aware Java package derivation (`my-app` → `com.example.my_app`)
-- [ ] `jet.toml` parser (`[package]`, `java`, `[dependencies]`)
-- [ ] `jet build` — invoke `javac` against `src/main/java`, output to `target/classes`
-- [ ] `jet run` — execute `Main` (or `[package].main`) via `java -cp`
-- [ ] `jet clean` — `rm -rf target/`
-- [ ] Source-level incremental compilation (skip unchanged files by mtime + hash)
-- [ ] Helpful error messages when `javac`/`java` are missing
+- [x] `jet.toml` parser (`[package]`, `[dependencies]`, `[dev-dependencies]`, `[repositories]`, `[build]`) via serde + toml_edit
+- [x] `jet build` — invoke `javac` against `src/main/java`, output to `target/classes`
+- [x] `jet run` — execute `Main` (or `[package].main`) via `java -cp`; auto-scans `target/classes` for `public static void main` if not declared
+- [x] `jet clean` — `rm -rf target/`
+- [x] Coarse incremental compilation — sha256 fingerprint of (sources + deps + java version + flags); full recompile on any change
+- [x] Helpful error messages when `javac`/`java` are missing — JAVA_HOME state echoed, links to SDKMAN/Adoptium
 
 **Exit criteria:** A user can `jet new && jet run` and see `Hello, world!` in under a second after the first compile.
 
@@ -29,16 +29,28 @@ The smallest thing that resembles a build tool. No network, no dependencies — 
 
 Talk to Maven Central. The first version that competes with `mvn` for non-trivial projects.
 
-- [ ] Maven coordinate parsing (`group:artifact:version[:classifier]`)
-- [ ] HTTP fetcher with on-disk cache (`~/.jet/cache/`)
-- [ ] POM parser (just enough: `dependencies`, `parent`, `dependencyManagement`, properties)
-- [ ] Transitive resolution with conflict resolution (nearest-wins, like Maven)
-- [ ] `jet.lock` lockfile — generate, validate, refuse to build if drifted
-- [ ] `jet add <coord>` — append to `jet.toml` and re-resolve
-- [ ] Concurrent downloads with progress bars
-- [ ] `[repositories]` table for non-Central repositories (incl. auth)
+- [x] Maven coordinate parsing (`group:artifact:version[:classifier][@type]`) — `src/coord.rs`
+- [x] HTTP fetcher (`ureq`) with on-disk cache (`~/Library/Caches/jet/` etc. via the `dirs` crate)
+- [x] POM parser (`quick-xml` streaming) — `dependencies`, `parent`, `dependencyManagement`, properties, exclusions, optional, BOM imports
+- [x] Property interpolation (`${project.version}`, `${project.groupId}`, user-defined)
+- [x] Parent POM chain resolution (bounded to 32 hops)
+- [x] BOM imports (`<type>pom</type><scope>import</scope>`) — fetched and merged into dependencyManagement
+- [x] Transitive resolution with **nearest-wins** (Maven default): shallowest depth, first-declared as tiebreaker
+- [x] Scope handling: skip `test`/`provided`/`system` transitively; `import` scope only contributes management
+- [x] Optional dependencies skipped transitively
+- [x] Per-edge exclusions, inherited by subtree
+- [x] Version range syntax rejected with a clear error (deferred to a later release)
+- [x] `jet.lock` lockfile — TOML, sorted, atomic write, mirrors `Cargo.lock` conventions
+- [x] `jet add <group:artifact:version>` — validates coord, HEAD-checks Maven Central, mutates `jet.toml` via `toml_edit` (preserves comments), regenerates `jet.lock`
+- [x] sha256 verification of cached artifacts (refetches on mismatch)
+- [x] `[repositories]` schema in `jet.toml` (resolved by declaration order)
+- [ ] Concurrent downloads with progress bars (currently sequential)
+- [ ] Authenticated repositories (Sonatype/GitHub Packages credentials)
+- [ ] SNAPSHOT versions (deferred to 0.3)
 
-**Exit criteria:** A project depending on `jackson-databind` and `slf4j-api` builds against the same classpath Maven would produce, and reruns are cache-hits.
+**Verified end-to-end:** `jet add com.google.guava:guava:33.0.0-jre` resolves 7 transitive dependencies, fetches their JARs, compiles a Java program using `ImmutableList`, and runs it.
+
+**Exit criteria:** A project depending on `jackson-databind` and `slf4j-api` builds against the same classpath Maven would produce, and reruns are cache-hits. ✅
 
 ## 0.3 — "It tests" ✅
 

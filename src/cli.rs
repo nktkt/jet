@@ -47,6 +47,9 @@ pub enum Command {
         /// Build in release mode
         #[arg(long)]
         release: bool,
+        /// Re-resolve dependencies, ignoring jet.lock
+        #[arg(long)]
+        resolve: bool,
     },
     /// Compile and run the project's main class
     Run {
@@ -63,6 +66,9 @@ pub enum Command {
     Add {
         /// Coordinate in `group:artifact:version` form
         coord: String,
+        /// Skip remote existence check
+        #[arg(long)]
+        no_verify: bool,
     },
     /// Remove build artifacts
     Clean,
