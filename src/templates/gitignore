@@ -1,0 +1,60 @@
+# jet build output
+target/
+
+# Lockfile is committed (like Cargo.lock); explicitly un-ignore in case a
+# broader rule below ever covers it.
+!jet.lock
+
+# Defensive: stray .class files outside target/ are almost always accidental.
+*.class
+
+# Other Java build tools (users may run them alongside jet)
+.gradle/
+build/
+out/
+bin/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Logs & JVM diagnostics
+*.log
+hs_err_pid*
+replay_pid*
+*.hprof
+*.jfr
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Eclipse
+.project
+.classpath
+.settings/
+.factorypath
+.apt_generated/
+.apt_generated_tests/
+
+# NetBeans
+nbproject/private/
+nbbuild/
+nbdist/
+.nb-gradle/
+
+# VS Code (share project config; ignore per-user state)
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor scratch
+*.swp
+*.swo
+*~

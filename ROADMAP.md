@@ -10,8 +10,12 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done
 
 The smallest thing that resembles a build tool. No network, no dependencies — just the JDK on your `PATH`.
 
-- [~] CLI scaffold (`clap`-based) with all top-level subcommands stubbed
-- [ ] `jet new <name>` — generate a project with `jet.toml`, `src/main/java/Main.java`, `.gitignore`
+- [x] CLI scaffold (`clap`-based) with all top-level subcommands stubbed
+- [x] `jet new <path>` — generate a project with `jet.toml`, `src/main/java/<pkg>/Main.java`, `.gitignore`, `src/main/resources/.gitkeep`
+- [x] `jet init` — same scaffold in the current directory, non-destructive (skips files that already exist)
+- [x] `--no-vcs` flag; default runs `git init --quiet`
+- [x] Project name validation (length, charset, Java keywords, Windows-reserved, build-tool reserved)
+- [x] Hyphen-aware Java package derivation (`my-app` → `com.example.my_app`)
 - [ ] `jet.toml` parser (`[package]`, `java`, `[dependencies]`)
 - [ ] `jet build` — invoke `javac` against `src/main/java`, output to `target/classes`
 - [ ] `jet run` — execute `Main` (or `[package].main`) via `java -cp`
