@@ -42,6 +42,11 @@ pub struct WorkspaceTable {
     /// Subset built when no `-p` flag is given. Defaults to all members.
     #[serde(default, rename = "default-members")]
     pub default_members: Vec<String>,
+    /// Shared dependency definitions inherited by members via
+    /// `dep.workspace = true` (or `dep = { workspace = true, ... }`).
+    /// Mirrors Cargo's `[workspace.dependencies]`.
+    #[serde(default)]
+    pub dependencies: BTreeMap<String, DepSpec>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -74,12 +79,19 @@ pub enum DepSpec {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct DetailedDep {
-    /// `version` is required for Maven Central deps; absent for path deps.
+    /// `version` is required for Maven Central deps; absent for path deps and
+    /// for workspace-inherited deps.
     #[serde(default)]
     pub version: Option<String>,
     /// Path to a workspace member (relative to this manifest's directory).
     #[serde(default)]
     pub path: Option<String>,
+    /// `workspace = true` inherits the dep from `[workspace.dependencies]`
+    /// at the workspace root. Member can still override `scope`, `classifier`,
+    /// `type`, `exclude`, and `optional`; setting `version` alongside is
+    /// rejected at substitution time.
+    #[serde(default)]
+    pub workspace: bool,
     #[serde(default)]
     pub classifier: Option<String>,
     #[serde(default, rename = "type")]
@@ -123,6 +135,14 @@ impl DepSpec {
         match self {
             DepSpec::Version(_) => None,
             DepSpec::Detailed(d) => d.path.as_deref(),
+        }
+    }
+    /// True if this dep declared `workspace = true` and needs to be substituted
+    /// from `[workspace.dependencies]` at the workspace root.
+    pub fn inherits_workspace(&self) -> bool {
+        match self {
+            DepSpec::Version(_) => false,
+            DepSpec::Detailed(d) => d.workspace,
         }
     }
 }
@@ -224,18 +244,32 @@ impl Manifest {
                      `org.slf4j:slf4j-api`"
                 );
             }
-            // Path deps don't need a version; Maven deps do.
-            if spec.path().is_none() {
-                let v = spec.version();
-                if v.trim().is_empty() {
-                    bail!("dependency `{key}` has empty version");
+            // workspace-inherited deps draw their version from the workspace
+            // root; member must NOT also set version. Path deps don't need a
+            // version either.
+            if spec.inherits_workspace() {
+                if let DepSpec::Detailed(d) = spec {
+                    if d.version.is_some() {
+                        bail!(
+                            "dependency `{key}` has `workspace = true` but also \
+                             specifies `version`; one or the other"
+                        );
+                    }
                 }
-                if v.contains(',') || v.starts_with('[') || v.starts_with('(') {
-                    bail!(
-                        "dependency `{key} = \"{v}\"` looks like a Maven version range; \
-                         ranges are not supported — pin to an exact version"
-                    );
-                }
+                continue;
+            }
+            if spec.path().is_some() {
+                continue;
+            }
+            let v = spec.version();
+            if v.trim().is_empty() {
+                bail!("dependency `{key}` has empty version");
+            }
+            if v.contains(',') || v.starts_with('[') || v.starts_with('(') {
+                bail!(
+                    "dependency `{key} = \"{v}\"` looks like a Maven version range; \
+                     ranges are not supported — pin to an exact version"
+                );
             }
         }
         Ok(())

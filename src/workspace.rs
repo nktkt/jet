@@ -5,12 +5,12 @@
 //! over path dependencies. A future revision will add globs, parallel build
 //! scheduling, and workspace-package / workspace-dependencies inheritance.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
-use crate::manifest::Manifest;
+use crate::manifest::{DepSpec, DetailedDep, Manifest};
 
 /// One workspace member, fully loaded.
 pub struct Member {
@@ -97,7 +97,10 @@ impl Workspace {
                 .enumerate()
                 .map(|(i, m)| (m.name.clone(), i))
                 .collect();
-            Ok(Self { root: root_manifest_dir, members, by_name })
+            let ws_deps = ws.dependencies.clone();
+            let mut workspace = Self { root: root_manifest_dir, members, by_name };
+            workspace.resolve_inheritance(&ws_deps)?;
+            Ok(workspace)
         } else {
             // Implicit single-member workspace.
             let pkg = root_manifest.pkg().with_context(|| {
@@ -119,6 +122,18 @@ impl Workspace {
                 by_name,
             })
         }
+    }
+
+    /// Walk every member and substitute `dep.workspace = true` entries with the
+    /// matching value from `[workspace.dependencies]` at the workspace root.
+    /// Member-side keys (`scope`, `classifier`, `type`, `exclude`, `optional`)
+    /// override the workspace defaults.
+    fn resolve_inheritance(&mut self, ws_deps: &BTreeMap<String, DepSpec>) -> Result<()> {
+        for member in &mut self.members {
+            substitute_dep_table(&member.name, &mut member.manifest.dependencies, ws_deps)?;
+            substitute_dep_table(&member.name, &mut member.manifest.dev_dependencies, ws_deps)?;
+        }
+        Ok(())
     }
 
     pub fn is_explicit_workspace(&self) -> bool {
@@ -243,6 +258,90 @@ impl Workspace {
 
 fn canonicalize(p: &Path) -> PathBuf {
     p.canonicalize().unwrap_or_else(|_| p.to_path_buf())
+}
+
+fn substitute_dep_table(
+    member: &str,
+    deps: &mut BTreeMap<String, DepSpec>,
+    ws_deps: &BTreeMap<String, DepSpec>,
+) -> Result<()> {
+    for (key, spec) in deps.iter_mut() {
+        if !spec.inherits_workspace() {
+            continue;
+        }
+        let ws_entry = ws_deps.get(key).ok_or_else(|| {
+            anyhow::anyhow!(
+                "member `{member}` declares `{key}.workspace = true`, but the \
+                 workspace root has no `[workspace.dependencies].{key}`.\n\
+                 help: add `\"{key}\" = \"<version>\"` under `[workspace.dependencies]` \
+                 in the root jet.toml, or specify the version directly in the member."
+            )
+        })?;
+        *spec = merge_workspace_dep(ws_entry, spec, key, member)?;
+    }
+    Ok(())
+}
+
+/// Merge a workspace-defined dep with the member-side overrides. Workspace
+/// owns `version`; member can layer on `scope`, `classifier`, `type`,
+/// `exclude`, `optional`. Source-defining fields (`path`) on member side are
+/// rejected when `workspace = true`.
+fn merge_workspace_dep(
+    ws_entry: &DepSpec,
+    member_spec: &DepSpec,
+    key: &str,
+    member_name: &str,
+) -> Result<DepSpec> {
+    // The workspace entry is the base; copy its concrete fields.
+    let (base_version, base_classifier, base_ty, base_scope, base_exclude, base_optional) =
+        match ws_entry {
+            DepSpec::Version(v) => (Some(v.clone()), None, "jar".into(), None, vec![], false),
+            DepSpec::Detailed(d) => (
+                d.version.clone(),
+                d.classifier.clone(),
+                d.ty.clone().unwrap_or_else(|| "jar".into()),
+                d.scope.clone(),
+                d.exclude.clone(),
+                d.optional,
+            ),
+        };
+    if base_version.as_deref().map(str::trim).unwrap_or("").is_empty() {
+        bail!(
+            "[workspace.dependencies].{key} has no version; either add one or \
+             remove the entry"
+        );
+    }
+    // Member overrides.
+    let DepSpec::Detailed(m) = member_spec else {
+        // shouldn't happen: inherits_workspace() returned true
+        return Ok(ws_entry.clone());
+    };
+    if m.path.is_some() {
+        bail!(
+            "member `{member_name}` cannot use `path` together with `workspace = true` \
+             on `{key}`"
+        );
+    }
+    let merged = DetailedDep {
+        version: base_version,
+        path: None,
+        workspace: false, // resolved
+        classifier: m.classifier.clone().or(base_classifier),
+        ty: Some(m.ty.clone().unwrap_or(base_ty)),
+        scope: m.scope.clone().or(base_scope),
+        exclude: {
+            // Union: workspace excludes + member excludes, dedup.
+            let mut acc = base_exclude;
+            for e in &m.exclude {
+                if !acc.contains(e) {
+                    acc.push(e.clone());
+                }
+            }
+            acc
+        },
+        optional: m.optional || base_optional,
+    };
+    Ok(DepSpec::Detailed(merged))
 }
 
 /// Run a closure across workspace members in topological order, with up to
@@ -465,6 +564,123 @@ mod tests {
         let err = ws.topological_order().expect_err("should detect cycle");
         let msg = format!("{err:#}");
         assert!(msg.contains("cycle"), "expected cycle error, got: {msg}");
+    }
+
+    #[test]
+    fn workspace_dependencies_inheritance_basic() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            &tmp.path().join("jet.toml"),
+            r#"[workspace]
+members = ["a"]
+
+[workspace.dependencies]
+"org.slf4j:slf4j-api" = "2.0.13"
+"#,
+        );
+        write(
+            &tmp.path().join("a/jet.toml"),
+            r#"[package]
+name    = "a"
+version = "0.1.0"
+java    = 21
+
+[dependencies]
+"org.slf4j:slf4j-api".workspace = true
+"#,
+        );
+        let ws = Workspace::discover(tmp.path()).unwrap();
+        let dep = &ws.members[0].manifest.dependencies["org.slf4j:slf4j-api"];
+        assert_eq!(dep.version(), "2.0.13");
+        assert!(!dep.inherits_workspace(), "should be substituted post-discover");
+    }
+
+    #[test]
+    fn workspace_dependencies_inheritance_with_scope_override() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            &tmp.path().join("jet.toml"),
+            r#"[workspace]
+members = ["a"]
+
+[workspace.dependencies]
+"org.junit.jupiter:junit-jupiter" = "5.10.2"
+"#,
+        );
+        write(
+            &tmp.path().join("a/jet.toml"),
+            r#"[package]
+name    = "a"
+version = "0.1.0"
+java    = 21
+
+[dev-dependencies]
+"org.junit.jupiter:junit-jupiter" = { workspace = true, scope = "test" }
+"#,
+        );
+        let ws = Workspace::discover(tmp.path()).unwrap();
+        let dep = &ws.members[0].manifest.dev_dependencies["org.junit.jupiter:junit-jupiter"];
+        assert_eq!(dep.version(), "5.10.2");
+        match dep {
+            crate::manifest::DepSpec::Detailed(d) => {
+                assert_eq!(d.scope.as_deref(), Some("test"));
+            }
+            _ => panic!("expected detailed"),
+        }
+    }
+
+    #[test]
+    fn workspace_dependencies_missing_workspace_entry_errors() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            &tmp.path().join("jet.toml"),
+            r#"[workspace]
+members = ["a"]
+"#,
+        );
+        write(
+            &tmp.path().join("a/jet.toml"),
+            r#"[package]
+name    = "a"
+version = "0.1.0"
+java    = 21
+
+[dependencies]
+"org.slf4j:slf4j-api".workspace = true
+"#,
+        );
+        let err = Workspace::discover(tmp.path()).err().expect("should fail");
+        let msg = format!("{err:#}");
+        assert!(msg.contains("workspace.dependencies"), "got: {msg}");
+        assert!(msg.contains("org.slf4j:slf4j-api"), "got: {msg}");
+    }
+
+    #[test]
+    fn workspace_inherited_with_explicit_version_errors() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            &tmp.path().join("jet.toml"),
+            r#"[workspace]
+members = ["a"]
+
+[workspace.dependencies]
+"org.slf4j:slf4j-api" = "2.0.13"
+"#,
+        );
+        write(
+            &tmp.path().join("a/jet.toml"),
+            r#"[package]
+name    = "a"
+version = "0.1.0"
+java    = 21
+
+[dependencies]
+"org.slf4j:slf4j-api" = { workspace = true, version = "1.7.36" }
+"#,
+        );
+        let err = Workspace::discover(tmp.path()).err().expect("should fail");
+        let msg = format!("{err:#}");
+        assert!(msg.contains("workspace = true") && msg.contains("version"), "got: {msg}");
     }
 
     #[test]
