@@ -72,13 +72,26 @@ Talk to Maven Central. The first version that competes with `mvn` for non-trivia
 
 ## 0.4 — "It packages" 🎁
 
-- [ ] `jet package` — produce `target/<name>-<version>.jar`
-- [ ] Manifest generation (`Main-Class`, `Implementation-Version`)
-- [ ] `--uber` / shaded jar with conflict detection
-- [ ] Resource handling (`src/main/resources`)
-- [ ] Reproducible jars (sorted entries, fixed timestamps)
+- [x] `jet package` — produces `target/<name>-<version>.jar` (thin), `target/<name>-<version>-uber.jar` (with `--uber`)
+- [x] `MANIFEST.MF` generation (`Manifest-Version`, `Created-By: jet <ver>`, `Build-Jdk-Spec`, `Implementation-Title/Version/Vendor`, `Main-Class` when executable, 72-byte line wrap with leading-space continuation)
+- [x] Main-Class detection: `[package].main` → scan `target/classes` → fallback to library JAR (no `Main-Class` header) on zero or multiple candidates
+- [x] `--uber`: bundles all main `[dependencies]` JAR contents
+  - Class dedupe by content hash; identical bytes silently merged, differing bytes warned (kept earlier source)
+  - `META-INF/services/*` line-merged (concatenated, deduped) — preserves ServiceLoader providers
+  - `META-INF/*.SF`, `*.RSA`, `*.DSA`, `*.EC`, `SIG-*` stripped (signatures cannot survive shading)
+  - `META-INF/MANIFEST.MF` from deps skipped; jet writes its own
+  - `META-INF/LICENSE*` and `META-INF/NOTICE*` renamed to `META-INF/<name>-<jar>` to preserve attribution
+  - `module-info.class` and `META-INF/versions/*` skipped (TODO 0.5: MR-JAR support)
+  - Project's classes win over deps; warnings collected and printed at end
+- [x] Resource handling: `src/main/resources` walked at package time (no copy to `target/classes`); compiled output wins on path conflict; default-excludes `.DS_Store`, `Thumbs.db`, `*.swp`, `*~`, etc.
+- [x] **Reproducible JARs**: entries sorted lexicographically (POSIX byte order), `META-INF/` and `MANIFEST.MF` hoisted to positions 0/1; `SOURCE_DATE_EPOCH` honored (clamped to 1980-01-01 DOS minimum), default `2024-01-01T00:00:00Z`; fixed Unix mode `0o644` files / `0o755` dirs; deflate compression with default settings
 
-**Exit criteria:** `java -jar target/foo-0.1.0.jar` runs the application end-to-end.
+**Verified end-to-end:**
+- Thin JAR: `jet new app && jet package` → 4 entries, 875 bytes, `java -jar` runs.
+- Uber JAR: project + Guava (7 transitive deps) → 2486 entries, 3.1MB, `java -jar` runs and prints output using `ImmutableList`.
+- **Reproducibility**: two consecutive `jet package --uber` builds produce byte-identical SHA-256 (`c387904c…4300`).
+
+**Exit criteria:** `java -jar target/foo-0.1.0.jar` runs the application end-to-end. ✅
 
 ## 0.5 — "It scales" 🏗️
 

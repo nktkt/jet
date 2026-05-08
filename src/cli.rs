@@ -75,8 +75,12 @@ pub enum Command {
     },
     /// Remove build artifacts
     Clean,
-    /// Build a distributable artifact (jar / uber-jar)
-    Package,
+    /// Build a distributable JAR (thin by default; --uber for self-contained)
+    Package {
+        /// Build a self-contained uber JAR (bundles all main dependencies)
+        #[arg(long)]
+        uber: bool,
+    },
     /// Publish the project to a Maven-compatible repository
     Publish,
 }

@@ -1,9 +1,11 @@
 use anyhow::Result;
 use clap::Parser;
 
+mod classes;
 mod cli;
 mod cmd;
 mod coord;
+mod jar;
 mod javac;
 mod lockfile;
 mod manifest;
@@ -17,6 +19,7 @@ use cmd::build::{BuildArgs, cmd_build};
 use cmd::clean::cmd_clean;
 use cmd::init::{InitArgs, cmd_init};
 use cmd::new::{NewArgs, cmd_new};
+use cmd::package::{PackageArgs, cmd_package};
 use cmd::run::{RunArgs, cmd_run};
 use cmd::test::{TestArgs, cmd_test};
 
@@ -44,7 +47,7 @@ fn main() -> Result<()> {
             cmd_add(AddArgs { coord, no_verify, dev })
         }
         Command::Clean => cmd_clean(),
-        Command::Package => todo!("build distributable jar"),
+        Command::Package { uber } => cmd_package(PackageArgs { uber }),
         Command::Publish => todo!("publish to Maven repository"),
     }
 }
