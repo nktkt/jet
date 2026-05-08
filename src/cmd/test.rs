@@ -27,7 +27,7 @@ pub fn cmd_test(args: TestArgs) -> Result<()> {
     let started = Instant::now();
 
     // 1. Build main first (fail-fast if main doesn't compile).
-    let main = do_build(BuildArgs { release: false, force_resolve: false })?;
+    let main = do_build(BuildArgs { release: false, force_resolve: false, package: None })?;
     let root = main.project_root.clone();
 
     // 2. Resolve main + dev deps unified, regenerate jet.lock if needed.
@@ -86,7 +86,7 @@ To run tests, add JUnit 5 to [dev-dependencies]:
     println!("  Compiling tests ({} files)", test_sources.len());
     compile(CompileSpec {
         javac: &javac,
-        release: main.manifest.package.java,
+        release: main.manifest.pkg()?.java,
         classpath: &test_compile_cp,
         output_dir: &test_classes_dir,
         sources: &test_sources,
@@ -220,8 +220,8 @@ fn ensure_lockfile_with_dev(
     if !needs_dev && manifest.dependencies.is_empty() {
         // Empty lockfile.
         let lf = Lockfile::from_resolution(
-            &manifest.package.name,
-            &manifest.package.version,
+            &manifest.pkg()?.name,
+            &manifest.pkg()?.version,
             &Default::default(),
             &default_repos()[0],
         );
@@ -251,8 +251,8 @@ fn ensure_lockfile_with_dev(
         println!("  Resolving dependencies (with dev-dependencies)…");
         let resolution = resolve_with_dev(manifest, fetcher)?;
         let lf = Lockfile::from_resolution(
-            &manifest.package.name,
-            &manifest.package.version,
+            &manifest.pkg()?.name,
+            &manifest.pkg()?.version,
             &resolution,
             &default_repos()[0],
         );

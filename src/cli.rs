@@ -50,6 +50,9 @@ pub enum Command {
         /// Re-resolve dependencies, ignoring jet.lock
         #[arg(long)]
         resolve: bool,
+        /// Limit to a specific workspace member (and its path-dep ancestors)
+        #[arg(short = 'p', long)]
+        package: Option<String>,
     },
     /// Compile and run the project's main class
     Run {

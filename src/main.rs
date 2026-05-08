@@ -12,6 +12,7 @@ mod manifest;
 mod resolver;
 mod template;
 mod validate;
+mod workspace;
 
 use cli::{Cli, Command};
 use cmd::add::{AddArgs, cmd_add};
@@ -37,9 +38,10 @@ fn main() -> Result<()> {
             java,
             vcs: !no_vcs,
         }),
-        Command::Build { release, resolve } => cmd_build(BuildArgs {
+        Command::Build { release, resolve, package } => cmd_build(BuildArgs {
             release,
             force_resolve: resolve,
+            package,
         }),
         Command::Run { args } => cmd_run(RunArgs { args }),
         Command::Test { filter } => cmd_test(TestArgs { filter }),

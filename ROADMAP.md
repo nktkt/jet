@@ -97,13 +97,20 @@ Talk to Maven Central. The first version that competes with `mvn` for non-trivia
 
 Workspaces. Cargo's killer feature, ported to the JVM.
 
-- [ ] `[workspace]` table in a root `jet.toml` listing member projects
-- [ ] Path dependencies between workspace members
-- [ ] Topological build order, parallelized
-- [ ] Shared `target/` and lockfile across the workspace
-- [ ] `jet build -p <member>` to scope work
+- [x] `[workspace]` table in a root `jet.toml` listing member projects (`members`, `exclude`, `default-members`); supports a "virtual" workspace manifest with no `[package]` of its own
+- [x] Path dependencies between workspace members (`{ path = "../core" }`); skipped by the Maven resolver
+- [x] Topological build order via Kahn's algorithm with cycle detection (errors with the cycle members listed)
+- [x] `jet build -p <member>` scopes to that member plus its transitive path-dep ancestors
+- [x] `default-members` honored when no `-p` is given; non-default ancestors needed for compilation are still built
+- [x] Cross-member classpath wiring: each member's compile classpath inherits its path-deps' `target/classes` and resolved Maven JARs
+- [ ] Sequential build for now; parallel scheduler deferred to 0.5.1
+- [ ] Field inheritance (`version.workspace = true`, `[workspace.package]`, `[workspace.dependencies]`) deferred to 0.5.1
+- [ ] Glob patterns in `members` (`crates/*`) deferred to 0.5.1
+- [ ] Per-member `target/` for now; shared workspace-root `target/` + `jet.lock` deferred to 0.5.1
 
-**Exit criteria:** A 5-module workspace builds in parallel and only re-runs `javac` on the changed module's downstream graph.
+**Verified end-to-end:** A 3-member workspace (`core` ← `api` ← `cli`) builds in topological order, `java -cp` across all three classes runs the `cli` main and prints output via `api` calling into `core`. `jet build -p core` builds only `core` and skips downstream members.
+
+**Exit criteria:** A 5-module workspace builds in parallel and only re-runs `javac` on the changed module's downstream graph. _(Sequential build done in 0.5; parallel + selective rebuild deferred to 0.5.1.)_
 
 ## 0.6 — "It publishes" 🚀
 

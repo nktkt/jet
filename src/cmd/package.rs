@@ -32,7 +32,7 @@ pub struct PackageArgs {
 
 pub fn cmd_package(args: PackageArgs) -> Result<()> {
     let started = Instant::now();
-    let outputs = do_build(BuildArgs { release: false, force_resolve: false })?;
+    let outputs = do_build(BuildArgs { release: false, force_resolve: false, package: None })?;
     let root = outputs.project_root.clone();
     let manifest = outputs.manifest;
 
@@ -44,7 +44,7 @@ pub fn cmd_package(args: PackageArgs) -> Result<()> {
     // 1. META-INF/ + MANIFEST.MF (manifest content built once `--uber` adds
     // entries; manifest itself doesn't depend on dep contents).
     builder.put(Entry::dir("META-INF"));
-    let manifest_body = build_manifest(&manifest, main_class.as_deref(), args.uber);
+    let manifest_body = build_manifest(&manifest, main_class.as_deref(), args.uber)?;
     builder.put(Entry::file("META-INF/MANIFEST.MF", manifest_body));
 
     // 2. Project's compiled classes.
@@ -110,9 +110,9 @@ fn output_path(root: &Path, manifest: &Manifest, uber: bool) -> Result<PathBuf> 
     fs::create_dir_all(&target)
         .with_context(|| format!("creating {}", target.display()))?;
     let stem = if uber {
-        format!("{}-{}-uber.jar", manifest.package.name, manifest.package.version)
+        format!("{}-{}-uber.jar", manifest.pkg()?.name, manifest.pkg()?.version)
     } else {
-        format!("{}-{}.jar", manifest.package.name, manifest.package.version)
+        format!("{}-{}.jar", manifest.pkg()?.name, manifest.pkg()?.version)
     };
     Ok(target.join(stem))
 }
@@ -131,7 +131,7 @@ fn write_jar(builder: &JarBuilder, path: &Path, started: Instant) -> Result<()> 
 }
 
 fn resolve_main_class(manifest: &Manifest, classes_dir: &Path) -> Result<Option<String>> {
-    if let Some(m) = &manifest.package.main {
+    if let Some(m) = manifest.pkg()?.main.as_ref() {
         return Ok(Some(m.clone()));
     }
     let candidates = detect_main_classes(classes_dir)?;
@@ -149,14 +149,15 @@ fn resolve_main_class(manifest: &Manifest, classes_dir: &Path) -> Result<Option<
     }
 }
 
-fn build_manifest(manifest: &Manifest, main_class: Option<&str>, uber: bool) -> Vec<u8> {
+fn build_manifest(manifest: &Manifest, main_class: Option<&str>, uber: bool) -> Result<Vec<u8>> {
+    let pkg = manifest.pkg()?;
     let mut headers: Vec<(&str, String)> = Vec::with_capacity(8);
     headers.push(("Manifest-Version", "1.0".into()));
     headers.push(("Created-By", format!("jet {}", env!("CARGO_PKG_VERSION"))));
-    headers.push(("Build-Jdk-Spec", manifest.package.java.to_string()));
-    headers.push(("Implementation-Title", manifest.package.name.clone()));
-    headers.push(("Implementation-Version", manifest.package.version.clone()));
-    if let Some(vendor) = manifest.package.authors.first() {
+    headers.push(("Build-Jdk-Spec", pkg.java.to_string()));
+    headers.push(("Implementation-Title", pkg.name.clone()));
+    headers.push(("Implementation-Version", pkg.version.clone()));
+    if let Some(vendor) = pkg.authors.first() {
         headers.push(("Implementation-Vendor", vendor.clone()));
     }
     if let Some(m) = main_class {
@@ -165,7 +166,7 @@ fn build_manifest(manifest: &Manifest, main_class: Option<&str>, uber: bool) -> 
     if uber {
         headers.push(("Multi-Release", "false".into()));
     }
-    render_manifest(&headers)
+    Ok(render_manifest(&headers))
 }
 
 fn add_directory_tree(

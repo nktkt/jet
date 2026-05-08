@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -12,11 +12,14 @@ use crate::javac::{CompileSpec, compile, find_javac};
 use crate::lockfile::{LOCKFILE_NAME, Lockfile};
 use crate::manifest::Manifest;
 use crate::resolver::{Fetcher, Resolution, default_repos, resolve as resolve_deps};
+use crate::workspace::Workspace;
 
 pub struct BuildArgs {
     pub release: bool,
     /// Force re-resolution of dependencies (ignore jet.lock).
     pub force_resolve: bool,
+    /// Limit to a single workspace member (and its path-dep ancestors).
+    pub package: Option<String>,
 }
 
 /// Build outputs (paths the caller can use). Returned to `run` so it can
@@ -29,19 +32,120 @@ pub struct BuildOutputs {
 }
 
 pub fn cmd_build(args: BuildArgs) -> Result<()> {
-    do_build(args)?;
+    let cwd = std::env::current_dir()?;
+    let workspace = Workspace::discover(&cwd)?;
+
+    if !workspace.is_explicit_workspace() {
+        do_build(args)?;
+        return Ok(());
+    }
+
+    let order = workspace_build_order(&workspace, args.package.as_deref())?;
+    let mut built: HashMap<usize, BuildOutputs> = HashMap::new();
+    for idx in order {
+        let extra = collect_path_dep_classpath(&workspace, idx, &built);
+        let member = &workspace.members[idx];
+        let outputs = do_build_at(
+            member.path.clone(),
+            member.manifest.clone(),
+            args.release,
+            args.force_resolve,
+            extra,
+        )?;
+        built.insert(idx, outputs);
+    }
     Ok(())
 }
 
+/// Compute the topological build order for a workspace. With `package` set,
+/// scopes to the closure of that member and its path-dep ancestors.
+fn workspace_build_order(
+    workspace: &Workspace,
+    package: Option<&str>,
+) -> Result<Vec<usize>> {
+    if let Some(name) = package {
+        let idx = workspace.find_member(name)?;
+        return workspace.closure(idx);
+    }
+    let topo = workspace.topological_order()?;
+    let defaults = workspace.default_members();
+    let allowed: std::collections::HashSet<usize> = defaults.into_iter().collect();
+    // Always include path-dep ancestors of any default member, even if not
+    // themselves in default_members — otherwise we can't compile the target.
+    let mut needed: std::collections::HashSet<usize> = Default::default();
+    for &i in &topo {
+        if allowed.contains(&i) {
+            for j in workspace.closure(i)? {
+                needed.insert(j);
+            }
+        }
+    }
+    Ok(topo.into_iter().filter(|i| needed.contains(i)).collect())
+}
+
+/// Collect the classpath additions for a member that has path deps. Each
+/// path-dep contributes its compiled `target/classes` directory plus its
+/// transitively-resolved Maven JARs (already fetched during its own build).
+fn collect_path_dep_classpath(
+    workspace: &Workspace,
+    member_idx: usize,
+    built: &HashMap<usize, BuildOutputs>,
+) -> Vec<PathBuf> {
+    let mut extras: Vec<PathBuf> = Vec::new();
+    let mut stack: Vec<usize> = vec![member_idx];
+    let mut seen: std::collections::HashSet<usize> = Default::default();
+    seen.insert(member_idx);
+    while let Some(u) = stack.pop() {
+        for (_, spec) in &workspace.members[u].manifest.dependencies {
+            let Some(rel) = spec.path() else { continue };
+            let target_dir = workspace.members[u].path.join(rel);
+            let canonical = target_dir.canonicalize().unwrap_or(target_dir);
+            let Some(j) = workspace.members.iter().position(|m| {
+                m.path.canonicalize().unwrap_or_else(|_| m.path.clone()) == canonical
+            }) else {
+                continue;
+            };
+            if seen.insert(j) {
+                stack.push(j);
+                if let Some(outputs) = built.get(&j) {
+                    // Member's classpath = its classes_dir + its dep jars.
+                    for p in &outputs.classpath {
+                        if !extras.contains(p) {
+                            extras.push(p.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    extras
+}
+
+/// Single-project build (walks up from cwd to find `jet.toml`).
 pub fn do_build(args: BuildArgs) -> Result<BuildOutputs> {
-    let started = Instant::now();
     let cwd = std::env::current_dir()?;
     let root = Manifest::find_root(&cwd)?;
     let manifest = Manifest::load(&root)?;
+    do_build_at(root, manifest, args.release, args.force_resolve, Vec::new())
+}
+
+/// Build a specific manifest at `root`, with optional extra classpath entries
+/// (used by workspace builds to inject path-dep `target/classes` + JARs).
+pub fn do_build_at(
+    root: PathBuf,
+    manifest: Manifest,
+    release: bool,
+    force_resolve: bool,
+    extra_classpath: Vec<PathBuf>,
+) -> Result<BuildOutputs> {
+    let started = Instant::now();
     println!(
         "  Building `{}` v{} (Java {})",
-        manifest.package.name, manifest.package.version, manifest.package.java
+        manifest.pkg()?.name,
+        manifest.pkg()?.version,
+        manifest.pkg()?.java
     );
+    let args = BuildArgs { release, force_resolve, package: None };
 
     // 1. Resolve / load lockfile, fetch JARs.
     let dep_jars = if manifest.dependencies.is_empty() {
@@ -75,6 +179,14 @@ pub fn do_build(args: BuildArgs) -> Result<BuildOutputs> {
         }
         jars
     };
+
+    // 1b. Path-dep classpath additions (workspace builds inject these).
+    let mut dep_jars = dep_jars;
+    for p in extra_classpath {
+        if !dep_jars.contains(&p) {
+            dep_jars.push(p);
+        }
+    }
 
     // 2. Discover sources.
     let src_dir = root.join("src/main/java");
@@ -140,7 +252,7 @@ pub fn do_build(args: BuildArgs) -> Result<BuildOutputs> {
 
     compile(CompileSpec {
         javac: &javac,
-        release: manifest.package.java,
+        release: manifest.pkg()?.java,
         classpath: &classpath_for_javac,
         output_dir: &classes_dir,
         sources: &sources,
@@ -192,8 +304,8 @@ fn regenerate_lockfile(
 ) -> Result<Lockfile> {
     let resolution: Resolution = resolve_deps(manifest, fetcher)?;
     let lf = Lockfile::from_resolution(
-        &manifest.package.name,
-        &manifest.package.version,
+        &manifest.pkg()?.name,
+        &manifest.pkg()?.version,
         &resolution,
         &default_repos()[0],
     );
@@ -237,11 +349,11 @@ fn compute_fingerprint(
     release: bool,
 ) -> Result<BuildCache> {
     let mut hasher = Sha256::new();
-    hasher.update(manifest.package.name.as_bytes());
+    hasher.update(manifest.pkg()?.name.as_bytes());
     hasher.update(b"\0");
-    hasher.update(manifest.package.version.as_bytes());
+    hasher.update(manifest.pkg()?.version.as_bytes());
     hasher.update(b"\0");
-    hasher.update(manifest.package.java.to_string().as_bytes());
+    hasher.update(manifest.pkg()?.java.to_string().as_bytes());
     hasher.update(b"\0");
     hasher.update([release as u8]);
     let mut per_source: BTreeMap<String, String> = BTreeMap::new();
@@ -262,7 +374,7 @@ fn compute_fingerprint(
     Ok(BuildCache {
         fingerprint: fp,
         sources: per_source,
-        java: manifest.package.java,
+        java: manifest.pkg()?.java,
         release,
     })
 }

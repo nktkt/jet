@@ -65,6 +65,10 @@ fn decls_from(
 ) -> Result<Vec<DependencyDecl>> {
     let mut out = Vec::with_capacity(deps.len());
     for (key, spec) in deps {
+        // Path deps are workspace-local; not resolved through Maven Central.
+        if spec.path().is_some() {
+            continue;
+        }
         let (group, artifact) = split_ga(key)?;
         out.push(DependencyDecl {
             group_id: group.into(),

@@ -12,10 +12,15 @@ use crate::validate::validate_project_name;
 
 pub const MANIFEST_FILENAME: &str = "jet.toml";
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Manifest {
-    pub package: PackageMeta,
+    /// Optional in workspace-root manifests that have only a `[workspace]` table
+    /// (a "virtual manifest" — pure aggregator with no package of its own).
+    #[serde(default)]
+    pub package: Option<PackageMeta>,
+    #[serde(default)]
+    pub workspace: Option<WorkspaceTable>,
     #[serde(default)]
     pub dependencies: BTreeMap<String, DepSpec>,
     #[serde(default, rename = "dev-dependencies")]
@@ -26,7 +31,20 @@ pub struct Manifest {
     pub build: BuildConfig,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkspaceTable {
+    /// Member directories, relative to the workspace root.
+    pub members: Vec<String>,
+    /// Paths to skip even if matched by `members`.
+    #[serde(default)]
+    pub exclude: Vec<String>,
+    /// Subset built when no `-p` flag is given. Defaults to all members.
+    #[serde(default, rename = "default-members")]
+    pub default_members: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PackageMeta {
     pub name: String,
@@ -46,17 +64,22 @@ pub struct PackageMeta {
     pub description: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum DepSpec {
     Version(String),
     Detailed(DetailedDep),
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct DetailedDep {
-    pub version: String,
+    /// `version` is required for Maven Central deps; absent for path deps.
+    #[serde(default)]
+    pub version: Option<String>,
+    /// Path to a workspace member (relative to this manifest's directory).
+    #[serde(default)]
+    pub path: Option<String>,
     #[serde(default)]
     pub classifier: Option<String>,
     #[serde(default, rename = "type")]
@@ -70,10 +93,11 @@ pub struct DetailedDep {
 }
 
 impl DepSpec {
+    /// Maven version (empty string for path-only deps).
     pub fn version(&self) -> &str {
         match self {
             DepSpec::Version(v) => v,
-            DepSpec::Detailed(d) => &d.version,
+            DepSpec::Detailed(d) => d.version.as_deref().unwrap_or(""),
         }
     }
     pub fn classifier(&self) -> Option<&str> {
@@ -94,9 +118,16 @@ impl DepSpec {
             DepSpec::Detailed(d) => &d.exclude,
         }
     }
+    /// `Some(path)` for a path dependency (`{ path = "../foo" }`).
+    pub fn path(&self) -> Option<&str> {
+        match self {
+            DepSpec::Version(_) => None,
+            DepSpec::Detailed(d) => d.path.as_deref(),
+        }
+    }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Repository {
     pub url: String,
@@ -104,7 +135,7 @@ pub struct Repository {
     pub default: bool,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct BuildConfig {
     #[serde(default, rename = "sourceDirs")]
@@ -154,16 +185,37 @@ impl Manifest {
         Ok(m)
     }
 
+    /// The `[package]` table. Bails on a virtual workspace manifest (which
+    /// has only `[workspace]` and no package of its own).
+    pub fn pkg(&self) -> Result<&PackageMeta> {
+        self.package.as_ref().ok_or_else(|| {
+            anyhow::anyhow!(
+                "this jet.toml has no [package] table — it's a virtual workspace manifest"
+            )
+        })
+    }
+
+    /// True when this manifest is a workspace root (has `[workspace]`).
+    pub fn is_workspace_root(&self) -> bool {
+        self.workspace.is_some()
+    }
+
     fn check(&self) -> Result<()> {
-        validate_project_name(&self.package.name)?;
-        if self.package.version.trim().is_empty() {
-            bail!("[package].version cannot be empty");
-        }
-        if !(8..=25).contains(&self.package.java) {
-            bail!(
-                "[package].java = {} is out of range (supported: 8..=25)",
-                self.package.java
-            );
+        // Workspace-root virtual manifest: only [workspace] is required; no
+        // [package] is fine. Member/single-package manifests must have [package].
+        if let Some(pkg) = &self.package {
+            validate_project_name(&pkg.name)?;
+            if pkg.version.trim().is_empty() {
+                bail!("[package].version cannot be empty");
+            }
+            if !(8..=25).contains(&pkg.java) {
+                bail!(
+                    "[package].java = {} is out of range (supported: 8..=25)",
+                    pkg.java
+                );
+            }
+        } else if self.workspace.is_none() {
+            bail!("jet.toml must contain either [package] or [workspace]");
         }
         for (key, spec) in self.dependencies.iter().chain(self.dev_dependencies.iter()) {
             if !key.contains(':') {
@@ -172,15 +224,18 @@ impl Manifest {
                      `org.slf4j:slf4j-api`"
                 );
             }
-            let v = spec.version();
-            if v.trim().is_empty() {
-                bail!("dependency `{key}` has empty version");
-            }
-            if v.contains(',') || v.starts_with('[') || v.starts_with('(') {
-                bail!(
-                    "dependency `{key} = \"{v}\"` looks like a Maven version range; \
-                     ranges are not supported in jet 0.2 — pin to an exact version"
-                );
+            // Path deps don't need a version; Maven deps do.
+            if spec.path().is_none() {
+                let v = spec.version();
+                if v.trim().is_empty() {
+                    bail!("dependency `{key}` has empty version");
+                }
+                if v.contains(',') || v.starts_with('[') || v.starts_with('(') {
+                    bail!(
+                        "dependency `{key} = \"{v}\"` looks like a Maven version range; \
+                         ranges are not supported — pin to an exact version"
+                    );
+                }
             }
         }
         Ok(())
@@ -225,14 +280,15 @@ impl Manifest {
         Ok(())
     }
 
-    /// Default Java package, e.g. `com.example.my_app`. Falls back to a
-    /// derivation from `name` if `package` is unset.
-    pub fn java_package(&self) -> String {
-        if let Some(p) = &self.package.package {
-            return p.clone();
+    /// Default Java package, e.g. `com.example.my_app`. Bails on virtual manifests.
+    #[allow(dead_code)]
+    pub fn java_package(&self) -> Result<String> {
+        let pkg = self.pkg()?;
+        if let Some(p) = &pkg.package {
+            return Ok(p.clone());
         }
-        let group = self.package.group.as_deref().unwrap_or("com.example");
-        format!("{group}.{}", crate::validate::to_java_package_segment(&self.package.name))
+        let group = pkg.group.as_deref().unwrap_or("com.example");
+        Ok(format!("{group}.{}", crate::validate::to_java_package_segment(&pkg.name)))
     }
 }
 
@@ -249,8 +305,8 @@ version = "0.1.0"
 java = 21
 "#;
         let m = Manifest::from_str(s).unwrap();
-        assert_eq!(m.package.name, "hello");
-        assert_eq!(m.package.java, 21);
+        assert_eq!(m.pkg().unwrap().name, "hello");
+        assert_eq!(m.pkg().unwrap().java, 21);
         assert!(m.dependencies.is_empty());
     }
 

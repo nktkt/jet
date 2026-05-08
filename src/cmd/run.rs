@@ -11,9 +11,9 @@ pub struct RunArgs {
 }
 
 pub fn cmd_run(args: RunArgs) -> Result<()> {
-    let outputs = do_build(BuildArgs { release: false, force_resolve: false })?;
+    let outputs = do_build(BuildArgs { release: false, force_resolve: false, package: None })?;
 
-    let main_class = match outputs.manifest.package.main.clone() {
+    let main_class = match outputs.manifest.pkg()?.main.clone() {
         Some(m) => m,
         None => {
             let candidates = detect_main_classes(&outputs.classes_dir)?;
