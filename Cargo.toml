@@ -1,0 +1,21 @@
+[package]
+name = "jet"
+version = "0.1.0"
+edition = "2024"
+description = "A fast, modern Java build tool inspired by Cargo and Bun."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/nktkt/jet"
+homepage = "https://github.com/nktkt/jet"
+readme = "README.md"
+keywords = ["java", "build", "jvm", "maven", "gradle"]
+categories = ["development-tools", "development-tools::build-utils"]
+rust-version = "1.85"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
