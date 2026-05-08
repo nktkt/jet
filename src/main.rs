@@ -38,10 +38,11 @@ fn main() -> Result<()> {
             java,
             vcs: !no_vcs,
         }),
-        Command::Build { release, resolve, package } => cmd_build(BuildArgs {
+        Command::Build { release, resolve, package, jobs } => cmd_build(BuildArgs {
             release,
             force_resolve: resolve,
             package,
+            jobs,
         }),
         Command::Run { args } => cmd_run(RunArgs { args }),
         Command::Test { filter } => cmd_test(TestArgs { filter }),

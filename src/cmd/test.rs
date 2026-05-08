@@ -27,7 +27,7 @@ pub fn cmd_test(args: TestArgs) -> Result<()> {
     let started = Instant::now();
 
     // 1. Build main first (fail-fast if main doesn't compile).
-    let main = do_build(BuildArgs { release: false, force_resolve: false, package: None })?;
+    let main = do_build(BuildArgs { release: false, force_resolve: false, package: None, jobs: None })?;
     let root = main.project_root.clone();
 
     // 2. Resolve main + dev deps unified, regenerate jet.lock if needed.
@@ -59,7 +59,7 @@ To run tests, add JUnit 5 to [dev-dependencies]:
         println!("  No tests found in {}", test_src_dir.display());
         return Ok(());
     }
-    let test_classes_dir = root.join("target/test-classes");
+    let test_classes_dir = main.target_dir.join("test-classes");
     let test_compile_cp: Vec<PathBuf> = std::iter::once(main.classes_dir.clone())
         .chain(main_jars.iter().cloned())
         .chain(dev_jars.iter().cloned())
@@ -108,7 +108,7 @@ To run tests, add JUnit 5 to [dev-dependencies]:
 
     // 7. Invoke launcher.
     let java = find_java()?;
-    let reports_dir = root.join("target/test-reports");
+    let reports_dir = main.target_dir.join("test-reports");
     fs::create_dir_all(&reports_dir).ok();
 
     let mut cmd = Command::new(&java);

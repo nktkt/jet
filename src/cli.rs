@@ -53,6 +53,9 @@ pub enum Command {
         /// Limit to a specific workspace member (and its path-dep ancestors)
         #[arg(short = 'p', long)]
         package: Option<String>,
+        /// Number of parallel build jobs (default: available_parallelism)
+        #[arg(short = 'j', long)]
+        jobs: Option<usize>,
     },
     /// Compile and run the project's main class
     Run {

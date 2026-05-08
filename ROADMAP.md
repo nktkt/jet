@@ -103,14 +103,15 @@ Workspaces. Cargo's killer feature, ported to the JVM.
 - [x] `jet build -p <member>` scopes to that member plus its transitive path-dep ancestors
 - [x] `default-members` honored when no `-p` is given; non-default ancestors needed for compilation are still built
 - [x] Cross-member classpath wiring: each member's compile classpath inherits its path-deps' `target/classes` and resolved Maven JARs
-- [ ] Sequential build for now; parallel scheduler deferred to 0.5.1
-- [ ] Field inheritance (`version.workspace = true`, `[workspace.package]`, `[workspace.dependencies]`) deferred to 0.5.1
-- [ ] Glob patterns in `members` (`crates/*`) deferred to 0.5.1
-- [ ] Per-member `target/` for now; shared workspace-root `target/` + `jet.lock` deferred to 0.5.1
+- [x] **0.5.1**: Parallel build scheduler. Topological worker pool with `--jobs N` flag (defaults to `available_parallelism`). Drops sender on first error to fail-fast; in-flight workers drain. Per-member output prefixed with `[name]`.
+- [x] **0.5.1**: Glob patterns in `members` (`crates/*` expands via the `glob` crate; `exclude` honored).
+- [x] **0.5.1**: Shared workspace-root `target/` layout: `target/classes/<member>/`, `target/jet-info/<member>/`, `target/test-classes/<member>/`, `target/test-reports/<member>/`, `target/<member>-<version>.jar`. Single-project mode keeps the legacy on-disk layout.
+- [ ] **0.5.2**: Field inheritance (`version.workspace = true`, `[workspace.package]`, `[workspace.dependencies]`) — needs custom serde Deserialize + post-parse substitution.
+- [ ] **0.5.2**: Shared workspace-root `jet.lock` — currently each member writes its own when build/resolve runs from inside it.
 
-**Verified end-to-end:** A 3-member workspace (`core` ← `api` ← `cli`) builds in topological order, `java -cp` across all three classes runs the `cli` main and prints output via `api` calling into `core`. `jet build -p core` builds only `core` and skips downstream members.
+**Verified end-to-end (0.5.1):** A 5-member workspace (`crates/{core,utils,api,server,cli}` declared as `members = ["crates/*"]`) builds in parallel. `core` and `utils` compile concurrently (interleaved `[core]`/`[utils]` output); `api` waits for both, `server` for `api`, `cli` for `server` — Kahn's wave scheduling visible in the output stream. `java -cp` across all five `target/classes/<member>/` directories runs the `cli` main and prints output that traverses 5 path-deps. `jet build -p api` produces only `core`, `utils`, `api` (closure honored). `jet build -j 1` runs sequentially.
 
-**Exit criteria:** A 5-module workspace builds in parallel and only re-runs `javac` on the changed module's downstream graph. _(Sequential build done in 0.5; parallel + selective rebuild deferred to 0.5.1.)_
+**Exit criteria:** A 5-module workspace builds in parallel and only re-runs `javac` on the changed module's downstream graph. ✅ (parallel done; selective rebuild via the existing fingerprint cache also works since each member has its own `target/jet-info/<member>/build.json`.)
 
 ## 0.6 — "It publishes" 🚀
 

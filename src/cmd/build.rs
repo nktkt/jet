@@ -20,12 +20,17 @@ pub struct BuildArgs {
     pub force_resolve: bool,
     /// Limit to a single workspace member (and its path-dep ancestors).
     pub package: Option<String>,
+    /// Number of parallel build jobs (default: available_parallelism).
+    pub jobs: Option<usize>,
 }
 
 /// Build outputs (paths the caller can use). Returned to `run` so it can
 /// reuse the classpath without redoing the work.
 pub struct BuildOutputs {
     pub project_root: PathBuf,
+    /// Root of the shared `target/` directory (workspace root in workspace
+    /// mode; project root in single-package mode).
+    pub target_dir: PathBuf,
     pub manifest: Manifest,
     pub classes_dir: PathBuf,
     pub classpath: Vec<PathBuf>,
@@ -41,19 +46,136 @@ pub fn cmd_build(args: BuildArgs) -> Result<()> {
     }
 
     let order = workspace_build_order(&workspace, args.package.as_deref())?;
+    let target_dir = workspace.root.join("target");
+
+    let jobs = args.jobs.unwrap_or_else(|| {
+        std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)
+    });
+    if jobs > 1 && order.len() > 1 {
+        run_parallel(&workspace, order, target_dir, args.release, args.force_resolve, jobs)
+    } else {
+        run_sequential(&workspace, order, target_dir, args.release, args.force_resolve)
+    }
+}
+
+fn run_sequential(
+    workspace: &crate::workspace::Workspace,
+    order: Vec<usize>,
+    target_dir: PathBuf,
+    release: bool,
+    force_resolve: bool,
+) -> Result<()> {
     let mut built: HashMap<usize, BuildOutputs> = HashMap::new();
     for idx in order {
-        let extra = collect_path_dep_classpath(&workspace, idx, &built);
+        let extra = collect_path_dep_classpath(workspace, idx, &built);
         let member = &workspace.members[idx];
         let outputs = do_build_at(
             member.path.clone(),
             member.manifest.clone(),
-            args.release,
-            args.force_resolve,
+            target_dir.clone(),
+            Some(member.name.clone()),
+            release,
+            force_resolve,
             extra,
         )?;
         built.insert(idx, outputs);
     }
+    Ok(())
+}
+
+fn run_parallel(
+    workspace: &crate::workspace::Workspace,
+    order: Vec<usize>,
+    target_dir: PathBuf,
+    release: bool,
+    force_resolve: bool,
+    jobs: usize,
+) -> Result<()> {
+    use std::sync::{Arc, Mutex};
+    let built: Arc<Mutex<HashMap<usize, BuildOutputs>>> =
+        Arc::new(Mutex::new(HashMap::new()));
+
+    // Snapshot Arc-friendly references for the worker closure.
+    let workspace_root = workspace.root.clone();
+    // Pre-clone manifests + paths so the closure doesn't borrow `workspace`.
+    let members: Vec<(PathBuf, crate::manifest::Manifest, String)> = workspace
+        .members
+        .iter()
+        .map(|m| (m.path.clone(), m.manifest.clone(), m.name.clone()))
+        .collect();
+    let members = Arc::new(members);
+    // Pre-compute the path-dep ancestor index for each member (transitive).
+    let n = workspace.members.len();
+    let mut transitive_path_deps: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for i in 0..n {
+        let mut stack = vec![i];
+        let mut seen = std::collections::HashSet::new();
+        while let Some(u) = stack.pop() {
+            if !seen.insert(u) {
+                continue;
+            }
+            for (_, spec) in &workspace.members[u].manifest.dependencies {
+                let Some(rel) = spec.path() else { continue };
+                let target = workspace.members[u]
+                    .path
+                    .join(rel)
+                    .canonicalize()
+                    .unwrap_or_else(|_| workspace.members[u].path.join(rel));
+                if let Some(j) = workspace.members.iter().position(|m| {
+                    m.path.canonicalize().unwrap_or_else(|_| m.path.clone()) == target
+                }) {
+                    if j != i {
+                        stack.push(j);
+                        if u == i {
+                            // Direct ancestors counted at user level; transitives at scheduling.
+                        }
+                        transitive_path_deps[i].push(j);
+                    }
+                }
+            }
+        }
+    }
+    let transitive_path_deps = Arc::new(transitive_path_deps);
+    let _ = workspace_root;
+
+    let built_for_worker = Arc::clone(&built);
+    let members_for_worker = Arc::clone(&members);
+    let transitive_for_worker = Arc::clone(&transitive_path_deps);
+    let target_dir_arc = Arc::new(target_dir);
+    let _ = crate::workspace::parallel_run::<(), _>(
+        workspace,
+        &order,
+        jobs,
+        move |idx| {
+            // Collect extras from already-built ancestors.
+            let extras: Vec<PathBuf> = {
+                let map = built_for_worker.lock().unwrap();
+                let mut acc: Vec<PathBuf> = Vec::new();
+                for &j in &transitive_for_worker[idx] {
+                    if let Some(out) = map.get(&j) {
+                        for p in &out.classpath {
+                            if !acc.contains(p) {
+                                acc.push(p.clone());
+                            }
+                        }
+                    }
+                }
+                acc
+            };
+            let (path, manifest, name) = members_for_worker[idx].clone();
+            let outputs = do_build_at(
+                path,
+                manifest,
+                (*target_dir_arc).clone(),
+                Some(name),
+                release,
+                force_resolve,
+                extras,
+            )?;
+            built_for_worker.lock().unwrap().insert(idx, outputs);
+            Ok(())
+        },
+    )?;
     Ok(())
 }
 
@@ -126,26 +248,58 @@ pub fn do_build(args: BuildArgs) -> Result<BuildOutputs> {
     let cwd = std::env::current_dir()?;
     let root = Manifest::find_root(&cwd)?;
     let manifest = Manifest::load(&root)?;
-    do_build_at(root, manifest, args.release, args.force_resolve, Vec::new())
+    let target_dir = root.join("target");
+    do_build_at(
+        root,
+        manifest,
+        target_dir,
+        None,
+        args.release,
+        args.force_resolve,
+        Vec::new(),
+    )
 }
 
 /// Build a specific manifest at `root`, with optional extra classpath entries
 /// (used by workspace builds to inject path-dep `target/classes` + JARs).
+///
+/// `target_dir` is the shared output root. If `member` is `Some`, outputs are
+/// written under `<target_dir>/classes/<member>/` etc. (workspace mode);
+/// otherwise they go to `<target_dir>/classes/` (single-project mode, which
+/// preserves the existing on-disk layout).
 pub fn do_build_at(
     root: PathBuf,
     manifest: Manifest,
+    target_dir: PathBuf,
+    member: Option<String>,
     release: bool,
     force_resolve: bool,
     extra_classpath: Vec<PathBuf>,
 ) -> Result<BuildOutputs> {
     let started = Instant::now();
+    let prefix = match &member {
+        Some(name) => format!("[{name}] "),
+        None => String::new(),
+    };
     println!(
-        "  Building `{}` v{} (Java {})",
+        "{prefix}Building `{}` v{} (Java {})",
         manifest.pkg()?.name,
         manifest.pkg()?.version,
         manifest.pkg()?.java
     );
-    let args = BuildArgs { release, force_resolve, package: None };
+    let args = BuildArgs { release, force_resolve, package: None, jobs: None };
+
+    // Workspace-aware path layout. Single-project keeps the legacy paths.
+    let classes_dir = match (&member, release) {
+        (Some(m), true) => target_dir.join("release/classes").join(m),
+        (Some(m), false) => target_dir.join("classes").join(m),
+        (None, true) => target_dir.join("release/classes"),
+        (None, false) => target_dir.join("classes"),
+    };
+    let info_dir = match &member {
+        Some(m) => target_dir.join("jet-info").join(m),
+        None => target_dir.join("jet-info"),
+    };
 
     // 1. Resolve / load lockfile, fetch JARs.
     let dep_jars = if manifest.dependencies.is_empty() {
@@ -198,15 +352,10 @@ pub fn do_build_at(
         );
     }
 
-    // 3. Determine output classes dir.
-    let classes_dir = if args.release {
-        root.join("target/release/classes")
-    } else {
-        root.join("target/classes")
-    };
+    // 3. classes_dir computed above (workspace-aware).
 
     // 4. Incremental check.
-    let cache_dir = root.join("target/jet-info");
+    let cache_dir = info_dir.clone();
     fs::create_dir_all(&cache_dir).ok();
     let cache_path = cache_dir.join(if args.release { "build-release.json" } else { "build.json" });
 
@@ -230,6 +379,7 @@ pub fn do_build_at(
         );
         return Ok(BuildOutputs {
             project_root: root,
+            target_dir: target_dir.clone(),
             manifest,
             classes_dir: classes_dir.clone(),
             classpath: build_classpath(&classes_dir, &dep_jars),
@@ -266,13 +416,14 @@ pub fn do_build_at(
 
     let elapsed = started.elapsed();
     println!(
-        "  Compiled {} source files in {:.0}ms",
+        "{prefix}Compiled {} source files in {:.0}ms",
         sources.len(),
         elapsed.as_secs_f64() * 1000.0
     );
 
     Ok(BuildOutputs {
         project_root: root,
+        target_dir: target_dir.clone(),
         manifest,
         classes_dir: classes_dir.clone(),
         classpath: build_classpath(&classes_dir, &dep_jars),

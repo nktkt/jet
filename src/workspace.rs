@@ -36,17 +36,43 @@ impl Workspace {
         let root_manifest = Manifest::load(&root_manifest_dir)?;
 
         if let Some(ws) = &root_manifest.workspace {
-            let mut members: Vec<Member> = Vec::with_capacity(ws.members.len());
-            let mut excluded: std::collections::HashSet<PathBuf> =
-                Default::default();
+            let mut excluded: std::collections::HashSet<PathBuf> = Default::default();
             for e in &ws.exclude {
-                excluded.insert(root_manifest_dir.join(e));
+                let canon = canonicalize(&root_manifest_dir.join(e));
+                excluded.insert(canon);
             }
+
+            // Expand member patterns through `glob`. Patterns without globbing
+            // metacharacters fall through as literal paths, matching cargo.
+            let mut paths: Vec<PathBuf> = Vec::new();
+            let mut seen: std::collections::HashSet<PathBuf> = Default::default();
             for raw in &ws.members {
-                let path = root_manifest_dir.join(raw);
-                if excluded.contains(&path) {
-                    continue;
+                let pattern = root_manifest_dir.join(raw);
+                let pattern_str = pattern.to_string_lossy();
+                let is_glob = raw.contains('*') || raw.contains('?') || raw.contains('[');
+                if is_glob {
+                    let entries = glob::glob(&pattern_str)
+                        .with_context(|| format!("invalid glob `{raw}`"))?;
+                    for entry in entries.filter_map(|e| e.ok()) {
+                        if entry.is_dir() && entry.join("jet.toml").is_file() {
+                            let canon = canonicalize(&entry);
+                            if !excluded.contains(&canon) && seen.insert(canon.clone()) {
+                                paths.push(entry);
+                            }
+                        }
+                    }
+                } else {
+                    let canon = canonicalize(&pattern);
+                    if !excluded.contains(&canon) && seen.insert(canon.clone()) {
+                        paths.push(pattern);
+                    }
                 }
+            }
+            // Stable order: lex by canonical path so builds are reproducible.
+            paths.sort_by(|a, b| a.to_string_lossy().cmp(&b.to_string_lossy()));
+
+            let mut members: Vec<Member> = Vec::with_capacity(paths.len());
+            for path in paths {
                 let manifest = Manifest::load(&path).with_context(|| {
                     format!("loading workspace member at {}", path.display())
                 })?;
@@ -217,6 +243,147 @@ impl Workspace {
 
 fn canonicalize(p: &Path) -> PathBuf {
     p.canonicalize().unwrap_or_else(|_| p.to_path_buf())
+}
+
+/// Run a closure across workspace members in topological order, with up to
+/// `jobs` of them executing concurrently. Members are kept in `order` and
+/// the per-member dependency edges (member-idx → its path-dep ancestors)
+/// determine readiness. The closure receives the member index and a list of
+/// the indices of its already-finished path-dep ancestors so it can collect
+/// their outputs without locking the shared map (callers pass in an
+/// `Arc<Mutex<HashMap>>` of outputs they own).
+///
+/// Fails fast on the first error: stops dispatching new work and waits for
+/// in-flight workers to drain before returning.
+pub fn parallel_run<T, F>(
+    workspace: &Workspace,
+    order: &[usize],
+    jobs: usize,
+    work: F,
+) -> Result<std::collections::HashMap<usize, T>>
+where
+    T: Send + 'static,
+    F: Fn(usize) -> Result<T> + Send + Sync + 'static,
+{
+    use std::sync::{Arc, Mutex};
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let n = order.len();
+    if n == 0 {
+        return Ok(Default::default());
+    }
+
+    // Per-member in-degree (count of path-dep ancestors that must finish first).
+    let mut adjacency: Vec<Vec<usize>> = vec![Vec::new(); workspace.members.len()];
+    let mut in_degree: Vec<usize> = vec![0; workspace.members.len()];
+    let included: std::collections::HashSet<usize> = order.iter().copied().collect();
+    for &i in order {
+        for (_, spec) in &workspace.members[i].manifest.dependencies {
+            let Some(rel) = spec.path() else { continue };
+            let target = canonicalize(&workspace.members[i].path.join(rel));
+            if let Some(j) = workspace.members.iter().position(|m| canonicalize(&m.path) == target) {
+                if included.contains(&j) {
+                    adjacency[j].push(i); // j -> i (j unlocks i)
+                    in_degree[i] += 1;
+                }
+            }
+        }
+    }
+
+    let work = Arc::new(work);
+    let outputs: Arc<Mutex<std::collections::HashMap<usize, T>>> =
+        Arc::new(Mutex::new(std::collections::HashMap::with_capacity(n)));
+    let in_degree = Arc::new(Mutex::new(in_degree));
+    let cancel = Arc::new(AtomicBool::new(false));
+    let first_error: Arc<Mutex<Option<anyhow::Error>>> = Arc::new(Mutex::new(None));
+
+    // Channels: ready queue (coordinator → workers), completion (workers → coordinator).
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel::<usize>();
+    let (done_tx, done_rx) = std::sync::mpsc::channel::<(usize, Result<T>)>();
+    let ready_rx = Arc::new(Mutex::new(ready_rx));
+
+    // Seed initially-ready members.
+    let mut remaining = n;
+    {
+        let deg = in_degree.lock().unwrap();
+        for &i in order {
+            if deg[i] == 0 {
+                ready_tx.send(i).expect("ready queue open");
+            }
+        }
+    }
+
+    let n_workers = jobs.max(1);
+    let mut handles = Vec::with_capacity(n_workers);
+    for _ in 0..n_workers {
+        let rx = Arc::clone(&ready_rx);
+        let tx = done_tx.clone();
+        let work = Arc::clone(&work);
+        let cancel = Arc::clone(&cancel);
+        handles.push(std::thread::spawn(move || {
+            loop {
+                let next = {
+                    let rx = rx.lock().unwrap();
+                    rx.recv()
+                };
+                let idx = match next {
+                    Ok(i) => i,
+                    Err(_) => break,
+                };
+                if cancel.load(Ordering::Relaxed) {
+                    // Drain quietly without running.
+                    continue;
+                }
+                let result = work(idx);
+                if tx.send((idx, result)).is_err() {
+                    break;
+                }
+            }
+        }));
+    }
+    drop(done_tx);
+
+    while remaining > 0 {
+        let (idx, result) = match done_rx.recv() {
+            Ok(v) => v,
+            Err(_) => break,
+        };
+        remaining -= 1;
+        match result {
+            Ok(out) => {
+                outputs.lock().unwrap().insert(idx, out);
+                // Decrement in-degrees of dependents.
+                let mut deg = in_degree.lock().unwrap();
+                for &dep in &adjacency[idx] {
+                    deg[dep] = deg[dep].saturating_sub(1);
+                    if deg[dep] == 0 && !cancel.load(Ordering::Relaxed) {
+                        let _ = ready_tx.send(dep);
+                    }
+                }
+            }
+            Err(e) => {
+                cancel.store(true, Ordering::Relaxed);
+                let mut slot = first_error.lock().unwrap();
+                if slot.is_none() {
+                    *slot = Some(e);
+                }
+            }
+        }
+    }
+    drop(ready_tx);
+
+    for h in handles {
+        let _ = h.join();
+    }
+
+    if let Some(e) = first_error.lock().unwrap().take() {
+        return Err(e);
+    }
+    let map = Arc::try_unwrap(outputs)
+        .map_err(|_| anyhow::anyhow!("internal: outputs Arc not unique"))?
+        .into_inner()
+        .map_err(|_| anyhow::anyhow!("internal: outputs Mutex poisoned"))?;
+    Ok(map)
 }
 
 #[cfg(test)]

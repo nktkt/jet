@@ -32,7 +32,7 @@ pub struct PackageArgs {
 
 pub fn cmd_package(args: PackageArgs) -> Result<()> {
     let started = Instant::now();
-    let outputs = do_build(BuildArgs { release: false, force_resolve: false, package: None })?;
+    let outputs = do_build(BuildArgs { release: false, force_resolve: false, package: None, jobs: None })?;
     let root = outputs.project_root.clone();
     let manifest = outputs.manifest;
 
@@ -63,7 +63,7 @@ pub fn cmd_package(args: PackageArgs) -> Result<()> {
             Ok(l) => l,
             Err(e) if !root.join(LOCKFILE_NAME).exists() && manifest.dependencies.is_empty() => {
                 eprintln!("  note: no jet.lock and no dependencies; skipping ({e:#})");
-                return write_jar(&builder, &output_path(&root, &manifest, args.uber)?, started);
+                return write_jar(&builder, &output_path(&outputs.target_dir, &manifest, args.uber)?, started);
             }
             Err(e) => return Err(e),
         };
@@ -95,7 +95,7 @@ pub fn cmd_package(args: PackageArgs) -> Result<()> {
     }
 
     // 5. Write JAR.
-    let out = output_path(&root, &manifest, args.uber)?;
+    let out = output_path(&outputs.target_dir, &manifest, args.uber)?;
     write_jar(&builder, &out, started)?;
 
     // 6. Print warnings (after success).
@@ -105,16 +105,15 @@ pub fn cmd_package(args: PackageArgs) -> Result<()> {
     Ok(())
 }
 
-fn output_path(root: &Path, manifest: &Manifest, uber: bool) -> Result<PathBuf> {
-    let target = root.join("target");
-    fs::create_dir_all(&target)
-        .with_context(|| format!("creating {}", target.display()))?;
+fn output_path(target_dir: &Path, manifest: &Manifest, uber: bool) -> Result<PathBuf> {
+    fs::create_dir_all(target_dir)
+        .with_context(|| format!("creating {}", target_dir.display()))?;
     let stem = if uber {
         format!("{}-{}-uber.jar", manifest.pkg()?.name, manifest.pkg()?.version)
     } else {
         format!("{}-{}.jar", manifest.pkg()?.name, manifest.pkg()?.version)
     };
-    Ok(target.join(stem))
+    Ok(target_dir.join(stem))
 }
 
 fn write_jar(builder: &JarBuilder, path: &Path, started: Instant) -> Result<()> {
