@@ -16,11 +16,28 @@ use crate::manifest::Manifest;
 use crate::resolver::fetcher::Fetcher;
 use crate::resolver::pom::{DependencyDecl, Pom, fetch_and_parse};
 
+/// Where in `jet.toml` a resolved dep was sourced from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Origin {
+    Main,
+    Dev,
+}
+
+impl Origin {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Origin::Main => "main",
+            Origin::Dev => "dev",
+        }
+    }
+}
+
 /// One resolved dependency entry.
 #[derive(Debug, Clone)]
 pub struct Resolved {
     pub coord: Coord,
     pub scope: String,
+    pub origin: Origin,
 }
 
 #[derive(Debug, Default)]
@@ -29,25 +46,33 @@ pub struct Resolution {
 }
 
 impl Resolution {
+    #[allow(dead_code)]
     pub fn compile_and_runtime(&self) -> impl Iterator<Item = &Resolved> {
         self.items
             .iter()
             .filter(|r| r.scope == "compile" || r.scope == "runtime")
     }
+
+    /// Iterate items reachable from main `[dependencies]`.
+    pub fn main(&self) -> impl Iterator<Item = &Resolved> {
+        self.items.iter().filter(|r| r.origin == Origin::Main)
+    }
 }
 
-/// Resolve a manifest's `[dependencies]` against a fetcher.
-pub fn resolve(manifest: &Manifest, fetcher: &Fetcher) -> Result<Resolution> {
-    let mut roots: Vec<DependencyDecl> = Vec::new();
-    for (key, spec) in &manifest.dependencies {
+fn decls_from(
+    deps: &std::collections::BTreeMap<String, crate::manifest::DepSpec>,
+    default_scope: &str,
+) -> Result<Vec<DependencyDecl>> {
+    let mut out = Vec::with_capacity(deps.len());
+    for (key, spec) in deps {
         let (group, artifact) = split_ga(key)?;
-        roots.push(DependencyDecl {
+        out.push(DependencyDecl {
             group_id: group.into(),
             artifact_id: artifact.into(),
             version: Some(spec.version().into()),
             classifier: spec.classifier().map(str::to_string),
             ty: Some(spec.ty().into()),
-            scope: Some("compile".into()),
+            scope: Some(default_scope.into()),
             optional: false,
             exclusions: spec
                 .exclusions()
@@ -62,7 +87,20 @@ pub fn resolve(manifest: &Manifest, fetcher: &Fetcher) -> Result<Resolution> {
                 .collect(),
         });
     }
-    do_resolve(&roots, fetcher)
+    Ok(out)
+}
+
+/// Resolve `[dependencies]` only.
+pub fn resolve(manifest: &Manifest, fetcher: &Fetcher) -> Result<Resolution> {
+    let main = decls_from(&manifest.dependencies, "compile")?;
+    do_resolve(&[(Origin::Main, main)], fetcher)
+}
+
+/// Resolve `[dependencies]` + `[dev-dependencies]`. Main wins on overlap.
+pub fn resolve_with_dev(manifest: &Manifest, fetcher: &Fetcher) -> Result<Resolution> {
+    let main = decls_from(&manifest.dependencies, "compile")?;
+    let dev = decls_from(&manifest.dev_dependencies, "compile")?;
+    do_resolve(&[(Origin::Main, main), (Origin::Dev, dev)], fetcher)
 }
 
 fn split_ga(key: &str) -> Result<(&str, &str)> {
@@ -75,6 +113,7 @@ struct Walk {
     decl: DependencyDecl,
     depth: usize,
     decl_order: usize,
+    origin: Origin,
     /// Inherited exclusions from ancestors.
     excluded: HashSet<(String, String)>,
     /// Inherited dependencyManagement (from BOMs and ancestors). Maps
@@ -82,20 +121,28 @@ struct Walk {
     managed: HashMap<(String, String), DependencyDecl>,
 }
 
-fn do_resolve(roots: &[DependencyDecl], fetcher: &Fetcher) -> Result<Resolution> {
-    // (g, a) -> (depth, decl_order, scope, coord)
-    let mut chosen: HashMap<(String, String), (usize, usize, String, Coord)> =
+fn do_resolve(
+    root_groups: &[(Origin, Vec<DependencyDecl>)],
+    fetcher: &Fetcher,
+) -> Result<Resolution> {
+    // (g, a) -> (depth, decl_order, scope, origin, coord)
+    let mut chosen: HashMap<(String, String), (usize, usize, String, Origin, Coord)> =
         HashMap::new();
     let mut queue: VecDeque<Walk> = VecDeque::new();
 
-    for (i, d) in roots.iter().enumerate() {
-        queue.push_back(Walk {
-            decl: d.clone(),
-            depth: 0,
-            decl_order: i,
-            excluded: HashSet::new(),
-            managed: HashMap::new(),
-        });
+    let mut decl_idx = 0usize;
+    for (origin, decls) in root_groups {
+        for d in decls {
+            queue.push_back(Walk {
+                decl: d.clone(),
+                depth: 0,
+                decl_order: decl_idx,
+                origin: *origin,
+                excluded: HashSet::new(),
+                managed: HashMap::new(),
+            });
+            decl_idx += 1;
+        }
     }
 
     while let Some(w) = queue.pop_front() {
@@ -157,14 +204,33 @@ fn do_resolve(roots: &[DependencyDecl], fetcher: &Fetcher) -> Result<Resolution>
         };
 
         // Nearest-wins: insert if shallower; tie-break by decl_order.
+        // Origin: main wins on overlap (preserve any prior Main marker).
+        let new_origin = match chosen.get(&key) {
+            Some((_, _, _, prior, _)) if *prior == Origin::Main => Origin::Main,
+            _ => w.origin,
+        };
         match chosen.get(&key) {
             None => {
-                chosen.insert(key.clone(), (w.depth, w.decl_order, eff_scope.clone(), coord.clone()));
+                chosen.insert(
+                    key.clone(),
+                    (w.depth, w.decl_order, eff_scope.clone(), new_origin, coord.clone()),
+                );
             }
-            Some((d, o, _, _)) if w.depth < *d || (w.depth == *d && w.decl_order < *o) => {
-                chosen.insert(key.clone(), (w.depth, w.decl_order, eff_scope.clone(), coord.clone()));
+            Some((d, o, _, _, _))
+                if w.depth < *d || (w.depth == *d && w.decl_order < *o) =>
+            {
+                chosen.insert(
+                    key.clone(),
+                    (w.depth, w.decl_order, eff_scope.clone(), new_origin, coord.clone()),
+                );
             }
-            Some(_) => continue, // current entry is better
+            Some(_) => {
+                // Existing chosen wins, but still upgrade origin if needed.
+                if let Some(entry) = chosen.get_mut(&key) {
+                    entry.3 = new_origin;
+                }
+                continue;
+            }
         }
 
         // Recurse: fetch this coord's POM and enqueue its dependencies.
@@ -215,20 +281,22 @@ fn do_resolve(roots: &[DependencyDecl], fetcher: &Fetcher) -> Result<Resolution>
                 decl,
                 depth: w.depth + 1,
                 decl_order: i,
+                origin: w.origin,
                 excluded,
                 managed: managed.clone(),
             });
+            let _ = ck; // silence unused
         }
     }
 
     // Build sorted output (deterministic).
-    let mut sorted: Vec<((String, String), (usize, usize, String, Coord))> =
+    let mut sorted: Vec<((String, String), (usize, usize, String, Origin, Coord))> =
         chosen.into_iter().collect();
     sorted.sort_by(|a, b| a.0.cmp(&b.0));
 
     let mut items = Vec::with_capacity(sorted.len());
-    for (_, (_, _, scope, coord)) in sorted {
-        items.push(Resolved { coord, scope });
+    for (_, (_, _, scope, origin, coord)) in sorted {
+        items.push(Resolved { coord, scope, origin });
     }
     // Ensure deterministic ordering by Coord display.
     items.sort_by(|a, b| a.coord.to_string().cmp(&b.coord.to_string()));

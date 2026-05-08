@@ -6,7 +6,10 @@ use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
 
-use crate::template::{default_java_package, render_gitignore, render_main_java, render_manifest};
+use crate::template::{
+    default_java_package, render_gitignore, render_main_java, render_main_test_java,
+    render_manifest,
+};
 use crate::validate::validate_project_name;
 
 /// Common options for both `new` and `init`.
@@ -69,6 +72,11 @@ impl Scaffold {
         write_file(
             &main_java_dir.join("Main.java"),
             &render_main_java(&pkg),
+            mode,
+        )?;
+        write_file(
+            &test_java_dir.join("MainTest.java"),
+            &render_main_test_java(&pkg),
             mode,
         )?;
         write_file(

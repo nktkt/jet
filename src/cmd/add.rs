@@ -7,6 +7,8 @@ pub struct AddArgs {
     pub coord: String,
     /// Skip remote existence verification.
     pub no_verify: bool,
+    /// Add to [dev-dependencies] instead of [dependencies].
+    pub dev: bool,
 }
 
 pub fn cmd_add(args: AddArgs) -> Result<()> {
@@ -20,9 +22,15 @@ pub fn cmd_add(args: AddArgs) -> Result<()> {
     let manifest = Manifest::load(&root)?;
 
     let key = format!("{}:{}", coord.group, coord.artifact);
-    if manifest.dependencies.contains_key(&key) {
+    let table = if args.dev { "dev-dependencies" } else { "dependencies" };
+    let already_present = if args.dev {
+        manifest.dev_dependencies.contains_key(&key)
+    } else {
+        manifest.dependencies.contains_key(&key)
+    };
+    if already_present {
         bail!(
-            "dependency `{key}` is already present in jet.toml \
+            "dependency `{key}` is already present in [{table}] \
              (use `jet remove {key}` first if you want to change the version)"
         );
     }
@@ -32,8 +40,8 @@ pub fn cmd_add(args: AddArgs) -> Result<()> {
     }
 
     let manifest_path = root.join(MANIFEST_FILENAME);
-    Manifest::add_dependency(&manifest_path, &key, &coord.version)?;
-    println!("  Added `{key} = \"{}\"` to jet.toml", coord.version);
+    Manifest::add_dep_to_table(&manifest_path, table, &key, &coord.version)?;
+    println!("  Added `{key} = \"{}\"` to [{table}]", coord.version);
 
     // Re-resolve to refresh jet.lock.
     use crate::cmd::build::{BuildArgs, do_build};

@@ -193,6 +193,17 @@ impl Manifest {
         key: &str,
         version: &str,
     ) -> Result<()> {
+        Self::add_dep_to_table(manifest_path, "dependencies", key, version)
+    }
+
+    /// Insert or replace a dependency under a given top-level table, preserving
+    /// comments. Used by `jet add` (table = "dependencies" or "dev-dependencies").
+    pub fn add_dep_to_table(
+        manifest_path: &Path,
+        table: &str,
+        key: &str,
+        version: &str,
+    ) -> Result<()> {
         let text = fs::read_to_string(manifest_path)
             .with_context(|| format!("reading {}", manifest_path.display()))?;
         let mut doc: DocumentMut = text
@@ -200,10 +211,10 @@ impl Manifest {
             .with_context(|| format!("parsing {}", manifest_path.display()))?;
 
         let deps = doc
-            .entry("dependencies")
+            .entry(table)
             .or_insert(toml_edit::Item::Table(Default::default()))
             .as_table_mut()
-            .ok_or_else(|| anyhow::anyhow!("[dependencies] is not a table"))?;
+            .ok_or_else(|| anyhow::anyhow!("[{table}] is not a table"))?;
         deps.insert(key, toml_edit::value(version));
 
         let tmp = manifest_path.with_extension("toml.tmp");

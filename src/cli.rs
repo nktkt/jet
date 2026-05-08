@@ -59,7 +59,7 @@ pub enum Command {
     },
     /// Run the project's tests
     Test {
-        /// Test name filter
+        /// Filter: ClassName, ClassName::method, com.pkg.*, or substring
         filter: Option<String>,
     },
     /// Add a dependency to jet.toml
@@ -69,6 +69,9 @@ pub enum Command {
         /// Skip remote existence check
         #[arg(long)]
         no_verify: bool,
+        /// Add to [dev-dependencies] instead of [dependencies]
+        #[arg(long)]
+        dev: bool,
     },
     /// Remove build artifacts
     Clean,

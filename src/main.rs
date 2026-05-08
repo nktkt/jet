@@ -18,6 +18,7 @@ use cmd::clean::cmd_clean;
 use cmd::init::{InitArgs, cmd_init};
 use cmd::new::{NewArgs, cmd_new};
 use cmd::run::{RunArgs, cmd_run};
+use cmd::test::{TestArgs, cmd_test};
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -38,8 +39,10 @@ fn main() -> Result<()> {
             force_resolve: resolve,
         }),
         Command::Run { args } => cmd_run(RunArgs { args }),
-        Command::Test { filter } => todo!("run tests (filter={filter:?})"),
-        Command::Add { coord, no_verify } => cmd_add(AddArgs { coord, no_verify }),
+        Command::Test { filter } => cmd_test(TestArgs { filter }),
+        Command::Add { coord, no_verify, dev } => {
+            cmd_add(AddArgs { coord, no_verify, dev })
+        }
         Command::Clean => cmd_clean(),
         Command::Package => todo!("build distributable jar"),
         Command::Publish => todo!("publish to Maven repository"),

@@ -3,7 +3,12 @@
 use crate::validate::to_java_package_segment;
 
 const MAIN_JAVA_TMPL: &str = include_str!("templates/Main.java.tmpl");
+const MAIN_TEST_JAVA_TMPL: &str = include_str!("templates/MainTest.java.tmpl");
 const GITIGNORE: &str = include_str!("templates/gitignore");
+
+/// Default JUnit Jupiter version put into newly-scaffolded projects'
+/// `[dev-dependencies]`. Kept conservative; users can bump freely.
+pub const DEFAULT_JUNIT_JUPITER_VERSION: &str = "5.10.2";
 
 /// Group used for the default Java package when the user does not supply one.
 const DEFAULT_GROUP: &str = "com.example";
@@ -14,7 +19,8 @@ pub fn default_java_package(name: &str) -> String {
     format!("{DEFAULT_GROUP}.{}", to_java_package_segment(name))
 }
 
-/// Render the `jet.toml` manifest for a freshly-scaffolded project.
+/// Render the `jet.toml` manifest for a freshly-scaffolded project. Pre-fills
+/// a JUnit Jupiter dev-dependency so `jet test` works on a fresh `jet new`.
 pub fn render_manifest(name: &str, version: &str, java: u32) -> String {
     format!(
         "[package]\n\
@@ -22,13 +28,21 @@ pub fn render_manifest(name: &str, version: &str, java: u32) -> String {
          version = \"{version}\"\n\
          java    = {java}\n\
          \n\
-         [dependencies]\n"
+         [dependencies]\n\
+         \n\
+         [dev-dependencies]\n\
+         \"org.junit.jupiter:junit-jupiter\" = \"{DEFAULT_JUNIT_JUPITER_VERSION}\"\n"
     )
 }
 
 /// Render `Main.java` with the given fully-qualified package.
 pub fn render_main_java(package: &str) -> String {
     MAIN_JAVA_TMPL.replace("{{package}}", package)
+}
+
+/// Render `MainTest.java` (a one-assertion JUnit 5 test) for a fresh project.
+pub fn render_main_test_java(package: &str) -> String {
+    MAIN_TEST_JAVA_TMPL.replace("{{package}}", package)
 }
 
 /// Return the canonical `.gitignore` content. No substitutions.

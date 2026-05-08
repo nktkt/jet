@@ -54,13 +54,21 @@ Talk to Maven Central. The first version that competes with `mvn` for non-trivia
 
 ## 0.3 — "It tests" ✅
 
-- [ ] `src/test/java` compiled separately with the test classpath
-- [ ] JUnit 5 (`junit-jupiter`) auto-detected and wired up
-- [ ] `jet test [filter]` — discovery + execution + colored output
-- [ ] Test report (console + JUnit XML for CI)
-- [ ] `[dev-dependencies]` table
+- [x] `src/test/java` compiled separately with a test-only classpath (main classes + main deps + dev deps)
+- [x] JUnit 5 (`junit-jupiter`) — Jupiter aggregate auto-resolved from `[dev-dependencies]`; junit-platform-console-standalone fetched on-demand and cached
+- [x] `jet test [filter]` — `--details=tree` colored output streamed verbatim
+- [x] Filter dispatch: `Foo::bar` (or `Foo#bar`) → `--select-method`; `com.pkg.Foo` → `--select-class`; `com.pkg.*` → `--select-package`; lowercase → substring `--include-classname`
+- [x] JUnit XML report written to `target/test-reports/` (Surefire-compatible — `TEST-junit-jupiter.xml` etc.)
+- [x] `[dev-dependencies]` table — single-pass resolution with `origin` tag (`main` / `dev`); main wins on overlap; persisted in jet.lock
+- [x] `jet add --dev <coord>` — adds to `[dev-dependencies]`
+- [x] `jet new` scaffolds a sample test (`src/test/java/<pkg>/MainTest.java`) and pre-fills the JUnit Jupiter dev-dep
+- [x] `-parameters` added to test compile (JUnit reflection); `-Werror` removed for tests
+- [x] Friendly error when no test framework is declared, pointing at `jet add --dev`
+- [x] Non-zero exit code on test failure (verified: `jet test` exits 1 on a failing assertion)
 
-**Exit criteria:** A project with JUnit 5 tests runs them with `jet test` and exits non-zero on failure.
+**Verified end-to-end:** `jet new app && jet test` resolves the full JUnit Jupiter graph (8 transitive deps), downloads the JUnit Platform Console Launcher (1.10.2), compiles the scaffolded test, runs it with tree-style output, and writes Surefire-compatible XML reports. A failing test produces exit code 1.
+
+**Exit criteria:** A project with JUnit 5 tests runs them with `jet test` and exits non-zero on failure. ✅
 
 ## 0.4 — "It packages" 🎁
 

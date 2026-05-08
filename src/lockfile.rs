@@ -35,9 +35,18 @@ pub struct Package {
     #[serde(rename = "type", default = "default_type")]
     pub ty: String,
     pub scope: String,
+    /// Where the dep originates: `"main"` (from `[dependencies]`) or `"dev"`
+    /// (only reachable from `[dev-dependencies]`). Defaults to `"main"` for
+    /// 0.2 lockfiles missing the field.
+    #[serde(default = "default_origin")]
+    pub origin: String,
     pub url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sha256: Option<String>,
+}
+
+fn default_origin() -> String {
+    "main".into()
 }
 
 fn default_type() -> String {
@@ -85,6 +94,7 @@ impl Lockfile {
                 classifier: r.coord.classifier.clone(),
                 ty: r.coord.ty.clone(),
                 scope: r.scope.clone(),
+                origin: r.origin.as_str().into(),
                 url: r.coord.artifact_url(repo_url),
                 sha256: None,
             })
@@ -123,7 +133,7 @@ impl Lockfile {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::resolver::Resolved;
+    use crate::resolver::{Resolved, resolve::Origin};
 
     #[test]
     fn round_trip() {
@@ -132,10 +142,12 @@ mod tests {
                 Resolved {
                     coord: "org.slf4j:slf4j-api:2.0.13".parse().unwrap(),
                     scope: "compile".into(),
+                    origin: Origin::Main,
                 },
                 Resolved {
                     coord: "com.google.guava:guava:33.0.0-jre".parse().unwrap(),
                     scope: "compile".into(),
+                    origin: Origin::Main,
                 },
             ],
         };

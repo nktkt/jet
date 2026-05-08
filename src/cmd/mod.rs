@@ -5,3 +5,4 @@ pub mod init;
 pub mod new;
 pub mod run;
 mod scaffold;
+pub mod test;
