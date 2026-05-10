@@ -47,6 +47,30 @@ pub struct WorkspaceTable {
     /// Mirrors Cargo's `[workspace.dependencies]`.
     #[serde(default)]
     pub dependencies: BTreeMap<String, DepSpec>,
+    /// Shared `[package]` field defaults. Members opt in per field via
+    /// `field.workspace = true` (or `field = { workspace = true }`).
+    /// Mirrors Cargo's `[workspace.package]`.
+    #[serde(default)]
+    pub package: Option<WorkspacePackage>,
+}
+
+/// Shared package metadata for inheritance. Each field is optional — only
+/// fields actually defined here can be inherited via `field.workspace = true`.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkspacePackage {
+    #[serde(default)]
+    pub version: Option<String>,
+    #[serde(default)]
+    pub java: Option<u32>,
+    #[serde(default)]
+    pub group: Option<String>,
+    #[serde(default)]
+    pub license: Option<String>,
+    #[serde(default)]
+    pub authors: Option<Vec<String>>,
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

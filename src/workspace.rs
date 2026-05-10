@@ -6,11 +6,13 @@
 //! scheduling, and workspace-package / workspace-dependencies inheritance.
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use toml_edit::{DocumentMut, Item, Value};
 
-use crate::manifest::{DepSpec, DetailedDep, Manifest};
+use crate::manifest::{DepSpec, DetailedDep, Manifest, WorkspacePackage, MANIFEST_FILENAME};
 
 /// One workspace member, fully loaded.
 pub struct Member {
@@ -71,11 +73,10 @@ impl Workspace {
             // Stable order: lex by canonical path so builds are reproducible.
             paths.sort_by(|a, b| a.to_string_lossy().cmp(&b.to_string_lossy()));
 
+            let ws_package = ws.package.clone().unwrap_or_default();
             let mut members: Vec<Member> = Vec::with_capacity(paths.len());
             for path in paths {
-                let manifest = Manifest::load(&path).with_context(|| {
-                    format!("loading workspace member at {}", path.display())
-                })?;
+                let manifest = load_member_manifest(&path, &ws_package)?;
                 let name = manifest
                     .pkg()
                     .with_context(|| {
@@ -258,6 +259,146 @@ impl Workspace {
 
 fn canonicalize(p: &Path) -> PathBuf {
     p.canonicalize().unwrap_or_else(|_| p.to_path_buf())
+}
+
+/// Load a workspace member's manifest, applying `[workspace.package]`
+/// inheritance via TOML pre-processing before typed parsing.
+fn load_member_manifest(path: &Path, ws_pkg: &WorkspacePackage) -> Result<Manifest> {
+    let manifest_path = path.join(MANIFEST_FILENAME);
+    let raw = fs::read_to_string(&manifest_path)
+        .with_context(|| format!("reading {}", manifest_path.display()))?;
+    let processed = preprocess_inheritance(&raw, ws_pkg, &manifest_path)?;
+    Manifest::from_str(&processed)
+        .with_context(|| format!("parsing {}", manifest_path.display()))
+}
+
+/// Walk the `[package]` table in a member's TOML and replace any field set to
+/// `{ workspace = true }` with the corresponding value from
+/// `[workspace.package]`. Errors when the workspace value is missing or when
+/// the inheritance marker is malformed.
+fn preprocess_inheritance(
+    raw: &str,
+    ws_pkg: &WorkspacePackage,
+    member_path: &Path,
+) -> Result<String> {
+    let mut doc: DocumentMut = raw
+        .parse()
+        .with_context(|| format!("parsing TOML in {}", member_path.display()))?;
+
+    let pkg_table = match doc.get_mut("package") {
+        Some(Item::Table(t)) => t,
+        _ => return Ok(doc.to_string()), // virtual manifest or no [package]
+    };
+
+    // Inheritable fields: matches WorkspacePackage's keys.
+    let fields: &[(&str, InheritKind)] = &[
+        ("version", InheritKind::String),
+        ("java", InheritKind::Integer),
+        ("group", InheritKind::String),
+        ("license", InheritKind::String),
+        ("authors", InheritKind::StringArray),
+        ("description", InheritKind::String),
+    ];
+
+    for (key, kind) in fields {
+        let Some(item) = pkg_table.get(*key) else { continue };
+        if !is_workspace_marker(item)? {
+            continue;
+        }
+        let new_item = resolve_workspace_value(*key, *kind, ws_pkg, member_path)?;
+        pkg_table.insert(*key, new_item);
+    }
+    Ok(doc.to_string())
+}
+
+#[derive(Clone, Copy)]
+enum InheritKind {
+    String,
+    Integer,
+    StringArray,
+}
+
+fn is_workspace_marker(item: &Item) -> Result<bool> {
+    let table = match item {
+        Item::Value(Value::InlineTable(t)) => {
+            // Convert inline table to comparable form.
+            let has_workspace = t.get("workspace").and_then(|v| v.as_bool()) == Some(true);
+            let extra: Vec<&str> =
+                t.iter().filter(|(k, _)| *k != "workspace").map(|(k, _)| k).collect();
+            if has_workspace && !extra.is_empty() {
+                bail!(
+                    "`workspace = true` cannot be combined with other keys: {}",
+                    extra.join(", ")
+                );
+            }
+            return Ok(has_workspace);
+        }
+        Item::Table(t) => t,
+        _ => return Ok(false),
+    };
+    let has_workspace = table.get("workspace").and_then(|i| match i {
+        Item::Value(Value::Boolean(f)) => Some(*f.value()),
+        _ => None,
+    }) == Some(true);
+    if has_workspace {
+        let extras: Vec<&str> =
+            table.iter().filter(|(k, _)| *k != "workspace").map(|(k, _)| k).collect();
+        if !extras.is_empty() {
+            bail!(
+                "`workspace = true` cannot be combined with other keys: {}",
+                extras.join(", ")
+            );
+        }
+    }
+    Ok(has_workspace)
+}
+
+fn resolve_workspace_value(
+    key: &str,
+    kind: InheritKind,
+    ws_pkg: &WorkspacePackage,
+    member_path: &Path,
+) -> Result<Item> {
+    let missing = || {
+        anyhow::anyhow!(
+            "in `{}`, `[package].{key}.workspace = true`, but the workspace root \
+             has no `[workspace.package].{key}`.\n\
+             help: add `{key} = ...` under `[workspace.package]` in the root jet.toml, \
+             or set `{key}` directly in the member.",
+            member_path.display()
+        )
+    };
+    match (key, kind) {
+        ("version", InheritKind::String) => {
+            let v = ws_pkg.version.as_deref().ok_or_else(missing)?;
+            Ok(toml_edit::value(v))
+        }
+        ("java", InheritKind::Integer) => {
+            let v = ws_pkg.java.ok_or_else(missing)?;
+            Ok(toml_edit::value(v as i64))
+        }
+        ("group", InheritKind::String) => {
+            let v = ws_pkg.group.as_deref().ok_or_else(missing)?;
+            Ok(toml_edit::value(v))
+        }
+        ("license", InheritKind::String) => {
+            let v = ws_pkg.license.as_deref().ok_or_else(missing)?;
+            Ok(toml_edit::value(v))
+        }
+        ("authors", InheritKind::StringArray) => {
+            let v = ws_pkg.authors.as_ref().ok_or_else(missing)?;
+            let mut arr = toml_edit::Array::new();
+            for s in v {
+                arr.push(s.as_str());
+            }
+            Ok(Item::Value(Value::Array(arr)))
+        }
+        ("description", InheritKind::String) => {
+            let v = ws_pkg.description.as_deref().ok_or_else(missing)?;
+            Ok(toml_edit::value(v))
+        }
+        _ => unreachable!("unknown inheritable key: {key}"),
+    }
 }
 
 fn substitute_dep_table(
@@ -681,6 +822,160 @@ java    = 21
         let err = Workspace::discover(tmp.path()).err().expect("should fail");
         let msg = format!("{err:#}");
         assert!(msg.contains("workspace = true") && msg.contains("version"), "got: {msg}");
+    }
+
+    #[test]
+    fn workspace_package_inherits_version_and_java() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            &tmp.path().join("jet.toml"),
+            r#"[workspace]
+members = ["a", "b"]
+
+[workspace.package]
+version = "1.2.3"
+java    = 21
+group   = "io.example"
+license = "Apache-2.0"
+"#,
+        );
+        for name in ["a", "b"] {
+            write(
+                &tmp.path().join(name).join("jet.toml"),
+                &format!(
+                    r#"[package]
+name    = "{name}"
+version.workspace = true
+java.workspace    = true
+group.workspace   = true
+license.workspace = true
+"#
+                ),
+            );
+        }
+        let ws = Workspace::discover(tmp.path()).unwrap();
+        for m in &ws.members {
+            let p = m.manifest.pkg().unwrap();
+            assert_eq!(p.version, "1.2.3");
+            assert_eq!(p.java, 21);
+            assert_eq!(p.group.as_deref(), Some("io.example"));
+            assert_eq!(p.license.as_deref(), Some("Apache-2.0"));
+        }
+    }
+
+    #[test]
+    fn workspace_package_inherits_authors_array() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            &tmp.path().join("jet.toml"),
+            r#"[workspace]
+members = ["a"]
+
+[workspace.package]
+version = "0.1.0"
+java    = 21
+authors = ["Ada <ada@example.org>", "Linus <linus@example.org>"]
+"#,
+        );
+        write(
+            &tmp.path().join("a/jet.toml"),
+            r#"[package]
+name              = "a"
+version.workspace = true
+java.workspace    = true
+authors.workspace = true
+"#,
+        );
+        let ws = Workspace::discover(tmp.path()).unwrap();
+        let p = ws.members[0].manifest.pkg().unwrap();
+        assert_eq!(
+            p.authors,
+            vec![
+                "Ada <ada@example.org>".to_string(),
+                "Linus <linus@example.org>".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn workspace_package_member_overrides() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            &tmp.path().join("jet.toml"),
+            r#"[workspace]
+members = ["a"]
+
+[workspace.package]
+version = "1.0.0"
+java    = 21
+"#,
+        );
+        write(
+            &tmp.path().join("a/jet.toml"),
+            r#"[package]
+name              = "a"
+version.workspace = true
+java              = 17
+"#,
+        );
+        let ws = Workspace::discover(tmp.path()).unwrap();
+        let p = ws.members[0].manifest.pkg().unwrap();
+        assert_eq!(p.version, "1.0.0", "version inherited");
+        assert_eq!(p.java, 17, "java overridden locally");
+    }
+
+    #[test]
+    fn workspace_package_missing_field_errors() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            &tmp.path().join("jet.toml"),
+            r#"[workspace]
+members = ["a"]
+
+[workspace.package]
+java = 21
+"#,
+        );
+        write(
+            &tmp.path().join("a/jet.toml"),
+            r#"[package]
+name              = "a"
+version.workspace = true
+java.workspace    = true
+"#,
+        );
+        let err = Workspace::discover(tmp.path()).err().expect("should fail");
+        let msg = format!("{err:#}");
+        assert!(msg.contains("workspace.package"), "got: {msg}");
+        assert!(msg.contains("version"), "got: {msg}");
+    }
+
+    #[test]
+    fn workspace_marker_rejects_extra_keys() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            &tmp.path().join("jet.toml"),
+            r#"[workspace]
+members = ["a"]
+
+[workspace.package]
+version = "1.0.0"
+"#,
+        );
+        write(
+            &tmp.path().join("a/jet.toml"),
+            r#"[package]
+name    = "a"
+version = { workspace = true, junk = "x" }
+java    = 21
+"#,
+        );
+        let err = Workspace::discover(tmp.path()).err().expect("should fail");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("workspace = true") && msg.contains("junk"),
+            "got: {msg}"
+        );
     }
 
     #[test]
