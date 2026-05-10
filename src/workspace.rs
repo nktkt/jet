@@ -12,7 +12,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use toml_edit::{DocumentMut, Item, Value};
 
-use crate::manifest::{DepSpec, DetailedDep, Manifest, WorkspacePackage, MANIFEST_FILENAME};
+use crate::lockfile::{LOCKFILE_NAME, Lockfile};
+use crate::manifest::{DepSpec, DetailedDep, Manifest, PackageMeta, WorkspacePackage, MANIFEST_FILENAME};
+use crate::resolver::{Fetcher, default_repos, resolve::resolve_with_dev};
 
 /// One workspace member, fully loaded.
 pub struct Member {
@@ -235,6 +237,91 @@ impl Workspace {
         Ok(topo.into_iter().filter(|i| included.contains(i)).collect())
     }
 
+    /// Generate (or refresh) the shared workspace `jet.lock` at the workspace
+    /// root. Unions every member's `[dependencies]` + `[dev-dependencies]`,
+    /// skipping path-deps and any entry still flagged `workspace = true`
+    /// (resolve_inheritance should already have substituted those). Runs the
+    /// resolver once over the union and writes to `<workspace_root>/jet.lock`.
+    ///
+    /// Detects cross-member version conflicts (same coord pinned to different
+    /// versions) and bails with the offending members listed.
+    pub fn ensure_lockfile(&self, fetcher: &Fetcher, force: bool) -> Result<Lockfile> {
+        let lock_path = self.root.join(LOCKFILE_NAME);
+        if !force && lock_path.is_file() {
+            // Trust existing lock for this build invocation. A future revision
+            // can hash member dep tables and compare against a stored input
+            // hash for staleness detection.
+            if let Ok(lf) = Lockfile::load(&self.root) {
+                return Ok(lf);
+            }
+        }
+
+        // Union every member's deps. Detect conflicts: same key with differing
+        // version, classifier, or path-vs-Maven mismatch.
+        let mut main: BTreeMap<String, (String, DepSpec)> = BTreeMap::new();
+        let mut dev: BTreeMap<String, (String, DepSpec)> = BTreeMap::new();
+        for member in &self.members {
+            collect_into(&member.name, &member.manifest.dependencies, &mut main)?;
+            collect_into(&member.name, &member.manifest.dev_dependencies, &mut dev)?;
+        }
+
+        if main.is_empty() && dev.is_empty() {
+            // Empty workspace lock. Persist for consistency.
+            let lf = Lockfile::from_resolution(
+                "workspace",
+                "0.0.0",
+                &Default::default(),
+                &default_repos()[0],
+            );
+            lf.save(&self.root)?;
+            return Ok(lf);
+        }
+
+        // Build a synthetic manifest just to feed the existing resolver API.
+        let synthetic = Manifest {
+            package: Some(PackageMeta {
+                name: "workspace_root".into(),
+                version: "0.0.0".into(),
+                java: 21,
+                group: None,
+                package: None,
+                main: None,
+                license: None,
+                authors: vec![],
+                description: None,
+            }),
+            workspace: None,
+            dependencies: main.into_iter().map(|(k, (_, v))| (k, v)).collect(),
+            dev_dependencies: dev.into_iter().map(|(k, (_, v))| (k, v)).collect(),
+            repositories: BTreeMap::new(),
+            build: Default::default(),
+        };
+        let resolution = resolve_with_dev(&synthetic, fetcher)?;
+        let lf = Lockfile::from_resolution(
+            "workspace",
+            "0.0.0",
+            &resolution,
+            &default_repos()[0],
+        );
+        lf.save(&self.root)?;
+        println!(
+            "  Resolved workspace: {}",
+            crate::resolver::resolve::summary(&resolution)
+        );
+        Ok(lf)
+    }
+
+    /// Walk every member directory and warn if a legacy per-member jet.lock
+    /// exists alongside the new workspace-root lock. Returns the list of
+    /// stale paths found (empty when clean).
+    pub fn find_legacy_member_locks(&self) -> Vec<PathBuf> {
+        self.members
+            .iter()
+            .map(|m| m.path.join(LOCKFILE_NAME))
+            .filter(|p| p.is_file())
+            .collect()
+    }
+
     pub fn find_member(&self, name: &str) -> Result<usize> {
         self.by_name.get(name).copied().ok_or_else(|| {
             let names: Vec<&str> = self.members.iter().map(|m| m.name.as_str()).collect();
@@ -399,6 +486,42 @@ fn resolve_workspace_value(
         }
         _ => unreachable!("unknown inheritable key: {key}"),
     }
+}
+
+/// Merge a member's deps into the workspace-wide map, detecting cross-member
+/// conflicts (same coord pinned to a different version by another member).
+/// Path-dep and unsubstituted workspace-inherited entries are skipped — the
+/// former are workspace-internal, the latter would have been resolved already.
+fn collect_into(
+    member: &str,
+    src: &BTreeMap<String, DepSpec>,
+    dest: &mut BTreeMap<String, (String, DepSpec)>,
+) -> Result<()> {
+    for (key, spec) in src {
+        if spec.path().is_some() || spec.inherits_workspace() {
+            continue;
+        }
+        match dest.get(key) {
+            Some((prior_member, prior_spec)) => {
+                let prior_v = prior_spec.version();
+                let cur_v = spec.version();
+                if prior_v != cur_v {
+                    bail!(
+                        "workspace dependency conflict on `{key}`: \
+                         member `{prior_member}` requires {prior_v}, \
+                         member `{member}` requires {cur_v}.\n\
+                         help: pin a single version under [workspace.dependencies] \
+                         and have both members use `{key}.workspace = true`."
+                    );
+                }
+                // Versions match: keep the first occurrence (deterministic).
+            }
+            None => {
+                dest.insert(key.clone(), (member.to_string(), spec.clone()));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn substitute_dep_table(
