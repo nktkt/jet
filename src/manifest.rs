@@ -29,6 +29,47 @@ pub struct Manifest {
     pub repositories: BTreeMap<String, Repository>,
     #[serde(default)]
     pub build: BuildConfig,
+    #[serde(default)]
+    pub publish: Option<PublishConfig>,
+}
+
+/// `[publish]` table — describes the target Maven repository and metadata
+/// embedded in the generated POM.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PublishConfig {
+    /// Target repository URL (Maven layout). Overridable via `JET_PUBLISH_URL`.
+    /// Examples:
+    /// - `https://maven.pkg.github.com/<owner>/<repo>`
+    /// - `https://oss.sonatype.org/service/local/staging/deploy/maven2/`
+    #[serde(default)]
+    pub url: Option<String>,
+    /// `<url>` of the generated POM (homepage / project page).
+    #[serde(default)]
+    pub homepage: Option<String>,
+    /// `<scm><url>` of the generated POM (source repo URL).
+    #[serde(default)]
+    pub repository: Option<String>,
+    /// `<scm><connection>` (e.g. `scm:git:https://github.com/...`).
+    #[serde(default, rename = "scm-connection")]
+    pub scm_connection: Option<String>,
+    /// `<scm><developerConnection>`.
+    #[serde(default, rename = "scm-developer-connection")]
+    pub scm_developer_connection: Option<String>,
+    /// Run `gpg --detach-sign` on every artifact before upload. Defaults
+    /// to `true`. Pass `--no-sign` on the CLI to skip for internal repos.
+    #[serde(default = "default_sign")]
+    pub sign: bool,
+    /// Specific GPG key fingerprint or user-id (forwarded to `gpg -u`).
+    #[serde(default, rename = "gpg-key")]
+    pub gpg_key: Option<String>,
+    /// Override the URL written into POM `<licenses><license><url>`.
+    #[serde(default, rename = "license-url")]
+    pub license_url: Option<String>,
+}
+
+fn default_sign() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

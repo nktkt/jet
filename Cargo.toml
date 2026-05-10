@@ -22,6 +22,7 @@ which = "7"
 ureq = { version = "2", default-features = false, features = ["tls"] }
 quick-xml = "0.36"
 sha2 = "0.10"
+sha1 = "0.10"
 hex = "0.4"
 indicatif = "0.17"
 dirs = "5"

@@ -88,5 +88,12 @@ pub enum Command {
         uber: bool,
     },
     /// Publish the project to a Maven-compatible repository
-    Publish,
+    Publish {
+        /// Stage everything under `target/publish/` instead of uploading
+        #[arg(long)]
+        dry_run: bool,
+        /// Skip GPG signing (overrides `[publish].sign`)
+        #[arg(long)]
+        no_sign: bool,
+    },
 }

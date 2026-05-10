@@ -295,6 +295,7 @@ impl Workspace {
             dev_dependencies: dev.into_iter().map(|(k, (_, v))| (k, v)).collect(),
             repositories: BTreeMap::new(),
             build: Default::default(),
+            publish: None,
         };
         let resolution = resolve_with_dev(&synthetic, fetcher)?;
         let lf = Lockfile::from_resolution(

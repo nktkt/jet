@@ -9,6 +9,7 @@ mod jar;
 mod javac;
 mod lockfile;
 mod manifest;
+mod pom;
 mod resolver;
 mod template;
 mod validate;
@@ -21,6 +22,7 @@ use cmd::clean::cmd_clean;
 use cmd::init::{InitArgs, cmd_init};
 use cmd::new::{NewArgs, cmd_new};
 use cmd::package::{PackageArgs, cmd_package};
+use cmd::publish::{PublishArgs, cmd_publish};
 use cmd::run::{RunArgs, cmd_run};
 use cmd::test::{TestArgs, cmd_test};
 
@@ -51,6 +53,8 @@ fn main() -> Result<()> {
         }
         Command::Clean => cmd_clean(),
         Command::Package { uber } => cmd_package(PackageArgs { uber }),
-        Command::Publish => todo!("publish to Maven repository"),
+        Command::Publish { dry_run, no_sign } => {
+            cmd_publish(PublishArgs { dry_run, no_sign })
+        }
     }
 }
