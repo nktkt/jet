@@ -1,3 +1,5 @@
+use std::ffi::OsString;
+
 use clap::{Parser, Subcommand};
 
 #[derive(Subcommand)]
@@ -21,7 +23,8 @@ pub enum JdkCommand {
     about = "A fast, modern Java build tool",
     long_about = "jet is a Cargo/Bun-inspired build tool for the JVM. \
                   It aims to replace Maven/Gradle with a simpler config (jet.toml), \
-                  faster builds, and a friendlier CLI."
+                  faster builds, and a friendlier CLI.",
+    allow_external_subcommands = true
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -98,6 +101,19 @@ pub enum Command {
     },
     /// Remove build artifacts
     Clean,
+    /// Print the resolved dependency tree
+    Tree {
+        /// Restrict to a single scope (compile, runtime, test, dev)
+        #[arg(long)]
+        scope: Option<String>,
+    },
+    /// Explain why a coord ended up in the resolved graph
+    Why {
+        /// `group:artifact` or `group:artifact:version`
+        coord: String,
+    },
+    /// List jet plugins (jet-* binaries) discoverable on PATH
+    Plugins,
     /// Build a distributable JAR (thin by default; --uber for self-contained)
     Package {
         /// Build a self-contained uber JAR (bundles all main dependencies)
@@ -109,6 +125,9 @@ pub enum Command {
         #[command(subcommand)]
         action: JdkCommand,
     },
+    /// Dispatched to `jet-<name>` on PATH (git-style plugin)
+    #[command(external_subcommand)]
+    External(Vec<OsString>),
     /// Publish the project to a Maven-compatible repository
     Publish {
         /// Stage everything under `target/publish/` instead of uploading

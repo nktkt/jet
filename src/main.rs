@@ -63,5 +63,18 @@ fn main() -> Result<()> {
         Command::Publish { dry_run, no_sign } => {
             cmd_publish(PublishArgs { dry_run, no_sign })
         }
+        Command::Tree { scope } => {
+            cmd::tree::cmd_tree(cmd::tree::TreeArgs { scope })
+        }
+        Command::Why { coord } => cmd::why::cmd_why(cmd::why::WhyArgs { coord }),
+        Command::Plugins => cmd::plugin::cmd_list(),
+        Command::External(args) => {
+            let mut iter = args.into_iter();
+            let name = iter
+                .next()
+                .map(|s| s.to_string_lossy().into_owned())
+                .ok_or_else(|| anyhow::anyhow!("empty external command"))?;
+            cmd::plugin::dispatch_external(&name, iter.collect())
+        }
     }
 }

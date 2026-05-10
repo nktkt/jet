@@ -157,10 +157,14 @@ Performance pass. The point at which `jet` should outclass Gradle on a cold cach
 
 ## 0.9 — "It extends" 🔌
 
-- [ ] Plugin API design (out-of-process by default; no classpath pollution)
-- [ ] First built-in plugins: `spring-boot`, `shadow`, `protobuf`
-- [ ] Plugin discovery via Maven coordinates
-- [ ] `jet why <coord>` and `jet tree` for diagnostics
+- [x] **`jet tree`** — reads `jet.lock`, walks each entry's cached POM, renders a box-drawing dep tree (mirrors `cargo tree` / `mvn dependency:tree`). `--scope` filter for compile/runtime/test/dev. Unresolved deps show `(not in lockfile — run jet build)` honestly rather than hiding the gap.
+- [x] **`jet why <coord>`** — BFS from every manifest root (main + dev) through cached POMs to find paths to the target `group:artifact`. Prints the selected version, origin, scope, and each path with hop count. Distinguishes root deps, paths through transitives, and "not in lockfile" cases.
+- [x] **External subcommand dispatch (git-style)** — `clap`'s `external_subcommand`. `jet <name>` not matching a built-in execs `jet-<name>` on PATH with the remaining argv, plus `JET_PROJECT_ROOT` (set if a `jet.toml` is found by walking up from cwd) and `JET_VERSION` env. Helpful error listing built-ins when no plugin matches.
+- [x] **`jet plugins`** — enumerates every `jet-*` binary on PATH, deduped, with the executable bit checked on Unix. Strips `.exe` on Windows.
+- [ ] **0.9.1**: First-party plugins (`spring-boot`, `shadow`, `protobuf`) — defer; the dispatch protocol is now stable enough for third-parties to ship plugins. The headline reason to do them in-tree is canonicalizing the protocol; that's now done.
+- [ ] **0.9.1**: Plugin discovery via Maven coordinates (download a JAR, run with `java -jar`) — defer; PATH-based discovery is enough for the v1.0 surface. Coordinate-based discovery is a 1.0+ story alongside the registry.
+
+**Verified end-to-end:** A demo project with `com.google.guava:guava:33.0.0-jre` shows the full 7-deep tree under `jet tree`, traces `jet why com.google.code.findbugs:jsr305` to the 2-hop path through Guava, reports the right "not in this project" message for an unrelated coord, and dispatches `jet hello world --foo bar` to a hand-rolled `jet-hello` shell script on PATH (with env vars and argv preserved). Unknown subcommands without a matching plugin error out with the built-in command list.
 
 ## 1.0 — "It is stable" 🎯
 
