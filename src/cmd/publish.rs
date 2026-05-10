@@ -40,6 +40,7 @@ pub fn cmd_publish(args: PublishArgs) -> Result<()> {
         force_resolve: false,
         package: None,
         jobs: None,
+        no_cache: false,
     })?;
     let root = outputs.project_root.clone();
     let manifest = outputs.manifest;

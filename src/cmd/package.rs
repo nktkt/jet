@@ -32,7 +32,7 @@ pub struct PackageArgs {
 
 pub fn cmd_package(args: PackageArgs) -> Result<()> {
     let started = Instant::now();
-    let outputs = do_build(BuildArgs { release: false, force_resolve: false, package: None, jobs: None })?;
+    let outputs = do_build(BuildArgs { release: false, force_resolve: false, package: None, jobs: None, no_cache: false })?;
     let root = outputs.project_root.clone();
     let manifest = outputs.manifest;
 

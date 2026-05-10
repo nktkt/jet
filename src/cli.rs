@@ -56,6 +56,9 @@ pub enum Command {
         /// Number of parallel build jobs (default: available_parallelism)
         #[arg(short = 'j', long)]
         jobs: Option<usize>,
+        /// Skip the content-addressed build cache
+        #[arg(long)]
+        no_cache: bool,
     },
     /// Compile and run the project's main class
     Run {

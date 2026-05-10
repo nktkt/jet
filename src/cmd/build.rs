@@ -22,6 +22,8 @@ pub struct BuildArgs {
     pub package: Option<String>,
     /// Number of parallel build jobs (default: available_parallelism).
     pub jobs: Option<usize>,
+    /// Skip the content-addressed build cache (`~/Library/Caches/jet/build/`).
+    pub no_cache: bool,
 }
 
 /// Build outputs (paths the caller can use). Returned to `run` so it can
@@ -72,9 +74,9 @@ pub fn cmd_build(args: BuildArgs) -> Result<()> {
         std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)
     });
     if jobs > 1 && order.len() > 1 {
-        run_parallel(&workspace, order, target_dir, args.release, args.force_resolve, jobs)
+        run_parallel(&workspace, order, target_dir, args.release, args.force_resolve, args.no_cache, jobs)
     } else {
-        run_sequential(&workspace, order, target_dir, args.release, args.force_resolve)
+        run_sequential(&workspace, order, target_dir, args.release, args.force_resolve, args.no_cache)
     }
 }
 
@@ -84,6 +86,7 @@ fn run_sequential(
     target_dir: PathBuf,
     release: bool,
     force_resolve: bool,
+    no_cache: bool,
 ) -> Result<()> {
     let mut built: HashMap<usize, BuildOutputs> = HashMap::new();
     for idx in order {
@@ -98,6 +101,7 @@ fn run_sequential(
             force_resolve,
             extra,
             Some(workspace.root.clone()),
+            no_cache,
         )?;
         built.insert(idx, outputs);
     }
@@ -110,6 +114,7 @@ fn run_parallel(
     target_dir: PathBuf,
     release: bool,
     force_resolve: bool,
+    no_cache: bool,
     jobs: usize,
 ) -> Result<()> {
     use std::sync::{Arc, Mutex};
@@ -194,6 +199,7 @@ fn run_parallel(
                 force_resolve,
                 extras,
                 Some((*workspace_root_for_worker).clone()),
+                no_cache,
             )?;
             built_for_worker.lock().unwrap().insert(idx, outputs);
             Ok(())
@@ -281,6 +287,7 @@ pub fn do_build(args: BuildArgs) -> Result<BuildOutputs> {
         args.force_resolve,
         Vec::new(),
         None,
+        args.no_cache,
     )
 }
 
@@ -303,6 +310,7 @@ pub fn do_build_at(
     force_resolve: bool,
     extra_classpath: Vec<PathBuf>,
     workspace_root: Option<PathBuf>,
+    no_cache: bool,
 ) -> Result<BuildOutputs> {
     let started = Instant::now();
     let prefix = match &member {
@@ -315,7 +323,7 @@ pub fn do_build_at(
         manifest.pkg()?.version,
         manifest.pkg()?.java
     );
-    let args = BuildArgs { release, force_resolve, package: None, jobs: None };
+    let args = BuildArgs { release, force_resolve, package: None, jobs: None, no_cache };
 
     // Workspace-aware path layout. Single-project keeps the legacy paths.
     let classes_dir = match (&member, release) {
@@ -415,7 +423,7 @@ pub fn do_build_at(
     {
         let elapsed = started.elapsed();
         println!(
-            "  Up-to-date ({:.0}ms)",
+            "{prefix}Up-to-date ({:.0}ms)",
             elapsed.as_secs_f64() * 1000.0
         );
         return Ok(BuildOutputs {
@@ -425,6 +433,34 @@ pub fn do_build_at(
             classes_dir: classes_dir.clone(),
             classpath: build_classpath(&classes_dir, &dep_jars),
         });
+    }
+
+    // 4b. Content-addressed cache lookup. Same fingerprint → restore from
+    // ~/Library/Caches/jet/build/<hash>/ instead of running javac. This
+    // catches branch switches, CI restores, and revert/edit cycles.
+    if !args.no_cache {
+        if let Ok(Some(cache)) = crate::build_cache::ContentCache::open() {
+            match cache.try_restore(&fingerprint.fingerprint, &classes_dir) {
+                Ok(true) => {
+                    fs::write(&cache_path, serde_json::to_string_pretty(&fingerprint)?)
+                        .ok();
+                    let elapsed = started.elapsed();
+                    println!(
+                        "{prefix}Cache hit ({:.0}ms)",
+                        elapsed.as_secs_f64() * 1000.0
+                    );
+                    return Ok(BuildOutputs {
+                        project_root: root,
+                        target_dir: target_dir.clone(),
+                        manifest,
+                        classes_dir: classes_dir.clone(),
+                        classpath: build_classpath(&classes_dir, &dep_jars),
+                    });
+                }
+                Ok(false) => {} // miss; continue to javac
+                Err(e) => eprintln!("{prefix}warning: cache lookup failed: {e:#}"),
+            }
+        }
     }
 
     // 5. Invoke javac.
@@ -454,6 +490,16 @@ pub fn do_build_at(
     // 6. Write incremental cache.
     fs::write(&cache_path, serde_json::to_string_pretty(&fingerprint)?)
         .with_context(|| format!("writing {}", cache_path.display()))?;
+
+    // 6b. Snapshot to the content-addressed cache so a future invocation
+    // with the same inputs can skip javac entirely.
+    if !args.no_cache {
+        if let Ok(Some(cache)) = crate::build_cache::ContentCache::open() {
+            if let Err(e) = cache.store(&fingerprint.fingerprint, &classes_dir) {
+                eprintln!("{prefix}warning: cache store failed: {e:#}");
+            }
+        }
+    }
 
     let elapsed = started.elapsed();
     println!(
