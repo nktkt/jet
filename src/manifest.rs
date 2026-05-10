@@ -31,6 +31,27 @@ pub struct Manifest {
     pub build: BuildConfig,
     #[serde(default)]
     pub publish: Option<PublishConfig>,
+    #[serde(default)]
+    pub toolchain: Option<ToolchainConfig>,
+}
+
+/// `[toolchain]` table — pin the JDK distribution used to build this project.
+/// When present, jet downloads the matching JDK from the Adoptium API on the
+/// first build and reuses it via `~/.jet/jdks/` thereafter.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolchainConfig {
+    /// Java major version (e.g. `21`, `25`).
+    pub version: u32,
+    /// Distribution vendor. Defaults to `temurin` (Eclipse Adoptium).
+    /// Adoptium accepts: `temurin`, `dragonwell`, `liberica`, `openj9`,
+    /// `corretto`, `zulu`, etc., but jet is tested against `temurin`.
+    #[serde(default = "default_vendor")]
+    pub vendor: String,
+}
+
+fn default_vendor() -> String {
+    "temurin".into()
 }
 
 /// `[publish]` table — describes the target Maven repository and metadata

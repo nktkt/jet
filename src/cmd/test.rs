@@ -9,7 +9,7 @@ use anyhow::{Context, Result, bail};
 use walkdir::WalkDir;
 
 use crate::coord::Coord;
-use crate::javac::{CompileSpec, compile, find_java, find_javac, join_classpath};
+use crate::javac::{CompileSpec, compile, find_java_for, find_javac_for, join_classpath};
 use crate::lockfile::{LOCKFILE_NAME, Lockfile};
 use crate::manifest::Manifest;
 use crate::resolver::{Fetcher, default_repos, resolve::resolve_with_dev};
@@ -65,7 +65,7 @@ To run tests, add JUnit 5 to [dev-dependencies]:
         .chain(dev_jars.iter().cloned())
         .collect();
 
-    let javac = find_javac()?;
+    let javac = find_javac_for(&main.manifest)?;
     let encoding = main
         .manifest
         .build
@@ -107,7 +107,7 @@ To run tests, add JUnit 5 to [dev-dependencies]:
     test_runtime_cp.push(console_jar.clone());
 
     // 7. Invoke launcher.
-    let java = find_java()?;
+    let java = find_java_for(&main.manifest)?;
     let reports_dir = main.target_dir.join("test-reports");
     fs::create_dir_all(&reports_dir).ok();
 

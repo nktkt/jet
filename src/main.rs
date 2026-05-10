@@ -13,10 +13,11 @@ mod manifest;
 mod pom;
 mod resolver;
 mod template;
+mod toolchain;
 mod validate;
 mod workspace;
 
-use cli::{Cli, Command};
+use cli::{Cli, Command, JdkCommand};
 use cmd::add::{AddArgs, cmd_add};
 use cmd::build::{BuildArgs, cmd_build};
 use cmd::clean::cmd_clean;
@@ -54,6 +55,10 @@ fn main() -> Result<()> {
             cmd_add(AddArgs { coord, no_verify, dev })
         }
         Command::Clean => cmd_clean(),
+        Command::Jdk { action } => match action {
+            JdkCommand::List => cmd::jdk::cmd_list(),
+            JdkCommand::Install { version, vendor } => cmd::jdk::cmd_install(version, vendor),
+        },
         Command::Package { uber } => cmd_package(PackageArgs { uber }),
         Command::Publish { dry_run, no_sign } => {
             cmd_publish(PublishArgs { dry_run, no_sign })

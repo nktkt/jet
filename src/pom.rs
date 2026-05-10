@@ -219,6 +219,7 @@ mod tests {
                 scm_developer_connection: Some("scm:git:ssh://git@github.com/me/demo.git".into()),
                 ..Default::default()
             }),
+            toolchain: None,
         }
     }
 

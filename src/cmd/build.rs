@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use walkdir::WalkDir;
 
-use crate::javac::{CompileSpec, compile, find_javac};
+use crate::javac::{CompileSpec, compile, find_javac_for};
 use crate::lockfile::{LOCKFILE_NAME, Lockfile};
 use crate::manifest::Manifest;
 use crate::resolver::{Fetcher, Resolution, default_repos, resolve as resolve_deps};
@@ -464,7 +464,7 @@ pub fn do_build_at(
     }
 
     // 5. Invoke javac.
-    let javac = find_javac()?;
+    let javac = find_javac_for(&manifest)?;
     let mut classpath_for_javac = dep_jars.clone();
     // For incremental, javac also needs prior .class outputs on the classpath.
     if classes_dir.is_dir() {

@@ -1,5 +1,19 @@
 use clap::{Parser, Subcommand};
 
+#[derive(Subcommand)]
+pub enum JdkCommand {
+    /// List jet-managed JDKs installed under ~/.jet/jdks/
+    List,
+    /// Download and install a JDK (default vendor: temurin)
+    Install {
+        /// Java major version (e.g. 21, 25)
+        version: u32,
+        /// Distribution vendor; defaults to `temurin`
+        #[arg(long, default_value = "temurin")]
+        vendor: String,
+    },
+}
+
 #[derive(Parser)]
 #[command(
     name = "jet",
@@ -89,6 +103,11 @@ pub enum Command {
         /// Build a self-contained uber JAR (bundles all main dependencies)
         #[arg(long)]
         uber: bool,
+    },
+    /// Manage jet-installed JDK toolchains under ~/.jet/jdks/
+    Jdk {
+        #[command(subcommand)]
+        action: JdkCommand,
     },
     /// Publish the project to a Maven-compatible repository
     Publish {

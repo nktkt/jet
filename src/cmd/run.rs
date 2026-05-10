@@ -4,7 +4,7 @@ use anyhow::{Context, Result, bail};
 
 use super::build::{BuildArgs, do_build};
 use crate::classes::detect_main_classes;
-use crate::javac::{find_java, join_classpath};
+use crate::javac::{find_java_for, join_classpath};
 
 pub struct RunArgs {
     pub args: Vec<String>,
@@ -33,7 +33,7 @@ pub fn cmd_run(args: RunArgs) -> Result<()> {
         }
     };
 
-    let java = find_java()?;
+    let java = find_java_for(&outputs.manifest)?;
     let cp = join_classpath(&outputs.classpath);
 
     println!("  Running `{main_class}`");

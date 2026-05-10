@@ -28,6 +28,8 @@ indicatif = "0.17"
 dirs = "5"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 glob = "0.3"
+tar = "0.4"
+flate2 = "1"
 
 [dev-dependencies]
 assert_cmd = "2"

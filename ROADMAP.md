@@ -145,9 +145,15 @@ Performance pass. The point at which `jet` should outclass Gradle on a cold cach
 
 ## 0.8 — "It manages tools" 🧰
 
-- [ ] `[toolchain]` table — declare required JDK version
-- [ ] Auto-download JDK from Adoptium / Foojay if missing
-- [ ] `jet jdk list` / `jet jdk install <version>`
+- [x] `[toolchain]` table in `jet.toml` — `version = 21`, `vendor = "temurin"` (default).
+- [x] Auto-download JDK from Adoptium API on first build. URL pattern: `https://api.adoptium.net/v3/binary/latest/<version>/ga/<os>/<arch>/jdk/hotspot/normal/<vendor>` (with the `temurin` → `eclipse` vendor mapping the API expects). Streams the tar.gz into memory, gunzips + untars via `tar` + `flate2`, lifts the single archive root into `~/.jet/jdks/<vendor>-<version>/`. Atomic via `<dir>.part/` rename.
+- [x] Cross-platform layout detection: locates `bin/javac` either at `<dir>/bin/javac` (Linux) or `<dir>/Contents/Home/bin/javac` (macOS `.jdk` bundle) — the smoke test on macOS arm64 picks up `Contents/Home/bin/javac` automatically.
+- [x] `jet jdk list` — walks `~/.jet/jdks/`, shows each entry as `<vendor> <version> (<home>)`.
+- [x] `jet jdk install <version> [--vendor temurin]` — explicit installer, idempotent (no-op when already cached).
+- [x] `find_javac_for(manifest)` / `find_java_for(manifest)` consult `[toolchain]` first, falling back to the existing JAVA_HOME/PATH/`/usr/libexec/java_home` chain. Build, run, and test all use the toolchain JDK when configured.
+- [x] `JET_JDKS_DIR` env var overrides the store path for tests and isolated CI runs.
+
+**Verified end-to-end (macOS arm64):** `jet jdk install 21` downloads 190 MB, extracts, and reports `temurin 21 (.../temurin-21/Contents/Home)` from `jet jdk list`. The installed `javac -version` reports `javac 21.0.11`. A project with `[toolchain] version = 21` builds with that JDK (`jet build` produces classes under `target/classes/`) and `jet run` launches it successfully. Subsequent invocations skip the download.
 
 ## 0.9 — "It extends" 🔌
 

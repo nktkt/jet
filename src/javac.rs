@@ -30,6 +30,26 @@ pub fn find_java() -> Result<PathBuf> {
     find_tool("java")
 }
 
+/// Resolve `javac` for a given manifest. If `[toolchain]` is set, use the
+/// jet-managed JDK at `~/.jet/jdks/<vendor>-<version>/` (auto-installing if
+/// absent); otherwise fall back to the system `find_javac`.
+pub fn find_javac_for(manifest: &crate::manifest::Manifest) -> Result<PathBuf> {
+    if let Some(tc) = &manifest.toolchain {
+        let paths = crate::toolchain::resolve_or_install(tc)?;
+        return Ok(paths.javac);
+    }
+    find_javac()
+}
+
+/// Resolve `java` for a given manifest. Mirrors [`find_javac_for`].
+pub fn find_java_for(manifest: &crate::manifest::Manifest) -> Result<PathBuf> {
+    if let Some(tc) = &manifest.toolchain {
+        let paths = crate::toolchain::resolve_or_install(tc)?;
+        return Ok(paths.java);
+    }
+    find_java()
+}
+
 fn find_tool(name: &str) -> Result<PathBuf> {
     if let Ok(home) = env::var("JAVA_HOME") {
         let candidate = Path::new(&home).join("bin").join(tool_name(name));

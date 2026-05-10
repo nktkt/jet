@@ -296,6 +296,7 @@ impl Workspace {
             repositories: BTreeMap::new(),
             build: Default::default(),
             publish: None,
+            toolchain: None,
         };
         let resolution = resolve_with_dev(&synthetic, fetcher)?;
         let lf = Lockfile::from_resolution(
