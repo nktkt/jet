@@ -308,14 +308,27 @@ lockfile format are stable for the 1.x line. ✅
 - [x] `BuildArgs.check_only` threaded through 10 call sites and the
   `do_build_at` workspace pipeline.
 
-## Beyond 1.8 (sketches)
+## 1.9 — "Inspect and tidy" 🔎  **shipped 2026-05-11**
+
+- [x] **`jet info <coord>`** — Maven Central metadata at a glance
+  (description, license, SCM, direct deps with `${prop}`
+  interpolation) plus the exact `jet add` command to install it.
+- [x] **`jet fmt [--check]`** — google-java-format wrapper that
+  auto-downloads the all-deps JAR (pinned `1.35.0`) into
+  `~/.jet/tools/` and runs it across `src/main/java` and
+  `src/test/java`. `--check` exits non-zero on diff, perfect for
+  CI / pre-commit.
+- [x] New `src/tools.rs` module hosts on-demand external-tool
+  binaries; future homes: Checkstyle, JMH runner, SpotBugs.
+
+## Beyond 1.9 (sketches)
 
 - **`jet bench`** — JMH wrapper, à la `cargo bench`.
-- **`jet fmt`** — wrap google-java-format or palantir-java-format.
-- **`jet info <coord>`** — show latest, license, scm, dependencies
-  for a Maven Central coord without adding it.
+- **`jet fmt`** custom config — palantir-java-format / AOSP /
+  custom rules via a `[fmt]` table in `jet.toml`.
 - **Workspace-wide `jet update`** — sweep every member manifest in one pass.
-- **`jet search --json`** — machine-readable hits for editor plugins.
+- **`jet search --json`** / **`jet info --json`** — machine-readable
+  hits for editor plugins.
 - **Remote build cache** — shared S3-backed cache, à la Bazel.
 - **Kotlin / Scala** — second-class but workable, via the existing toolchain hook.
 

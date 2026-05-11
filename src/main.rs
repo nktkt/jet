@@ -15,6 +15,7 @@ mod registry;
 mod resolver;
 mod template;
 mod toolchain;
+mod tools;
 mod validate;
 mod workspace;
 
@@ -87,6 +88,12 @@ fn main() -> Result<()> {
         }
         Command::Completions { shell } => {
             cmd::completions::cmd_completions(cmd::completions::CompletionsArgs { shell })
+        }
+        Command::Info { coord } => {
+            cmd::info::cmd_info(cmd::info::InfoArgs { coord })
+        }
+        Command::Fmt { check } => {
+            cmd::fmt::cmd_fmt(cmd::fmt::FmtArgs { check })
         }
         Command::Tree { scope } => {
             cmd::tree::cmd_tree(cmd::tree::TreeArgs { scope })

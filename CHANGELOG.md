@@ -4,6 +4,95 @@ All notable changes to `jet` are documented here. The format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). jet adheres to
 [Semantic Versioning](https://semver.org/) from `1.0.0` onward.
 
+## [1.9.0] — 2026-05-11
+
+### Added
+
+- **`jet info <coord>`** — show what Maven Central knows about a
+  coordinate without adding it. Accepts `group:artifact` (resolves
+  to the latest stable via the v1.5 registry helper, prereleases
+  filtered) or `group:artifact:version`. Fetches the POM through
+  the existing `Fetcher` so the local Maven cache is shared with
+  builds, parses a focused subset of fields (display name,
+  description, project URL, licenses, SCM url + connection, direct
+  dependency list with scopes), and prints a compact summary
+  ending in the exact `jet add` command you'd use to install it.
+  Properties referenced by `${...}` in dep versions get
+  interpolated against the POM's own `<properties>` for readable
+  display (parent-chain interpolation is intentionally not done —
+  that's resolver work, and the "(inherited)" label communicates
+  the difference clearly).
+
+  Output sample:
+  ```
+  JUnit Jupiter (Aggregator)  (org.junit.jupiter:junit-jupiter:5.10.2)
+    Module "junit-jupiter" of JUnit 5.
+
+    homepage:  https://junit.org/junit5/
+    license:   Eclipse Public License v2.0  (https://www.eclipse.org/legal/epl-v20.html)
+    scm:       https://github.com/junit-team/junit5
+    scm-conn:  scm:git:git://github.com/junit-team/junit5.git
+    deps:      3 declared (3 compile/runtime)
+      org.junit.jupiter:junit-jupiter-api  5.10.2
+      org.junit.jupiter:junit-jupiter-params  5.10.2
+      org.junit.jupiter:junit-jupiter-engine  5.10.2  [runtime]
+
+    add: jet add org.junit.jupiter:junit-jupiter:5.10.2
+  ```
+
+- **`jet fmt [--check]`** — format Java sources via google-java-format.
+  jet auto-downloads the all-deps JAR (pinned to `1.35.0`) from
+  GitHub releases on first use and caches it under
+  `~/.jet/tools/google-java-format-<ver>-all-deps.jar`. Walks
+  `src/main/java/` and `src/test/java/` for `.java` files, then
+  invokes:
+  ```
+  java --add-exports=jdk.compiler/...=ALL-UNNAMED \
+       -jar google-java-format-1.35.0-all-deps.jar \
+       --replace <files...>
+  ```
+  The `--add-exports` incantations open the JDK-internal javac API
+  that GJF needs on JDK 16+ (required up through JDK 25 — verified
+  on the smoke project). With `--check`, GJF is run in
+  `--dry-run --set-exit-if-changed` mode; jet bails with a clear
+  message and a non-zero status, ready to wire into pre-commit
+  hooks or CI fast-fail steps.
+
+### Internal
+
+- New top-level `src/tools.rs` module: `tools_dir()` resolves
+  `~/.jet/tools/` (overridable via `JET_TOOLS_DIR`), `ensure_gjf()`
+  performs an HTTPS GET via ureq with a 20s connect / 120s read
+  timeout, sanity-checks the response is a valid ZIP (`PK\x03\x04`
+  magic) before committing the bytes, and atomically renames
+  `<file>.tmp` → `<file>` to avoid leaving torn JARs on disk if the
+  download is interrupted. Same module will host future tool caches
+  (Checkstyle, JMH runner, etc.).
+- New `cmd/info.rs` with an embedded `parse_info` quick-xml state
+  machine that extracts only the fields `jet info` needs (the
+  resolver's existing `Pom` struct is build-concerned and we don't
+  want to bloat it with display-only fields). 4 new unit tests
+  cover the parser on a synthetic POM and the coord-parse helper.
+- New `cmd/fmt.rs` builds the GJF invocation; `--add-exports` set
+  hardcoded here rather than per-JDK detected since GJF documents
+  the exact module set and it hasn't changed in years.
+
+### Smoke-tested
+
+- `jet info com.google.guava:guava` (no version) auto-resolves to
+  `33.4.8-jre`, prints description + homepage + 5 deps with
+  property interpolation; one dep with `(inherited)` version
+  (inherited from parent dependencyManagement) shown verbatim.
+- `jet info org.junit.jupiter:junit-jupiter:5.10.2` pinned-version
+  path shows full license + SCM block.
+- `jet info bogus` → clear `must be group:artifact ...` error.
+- `jet info com.example.totally:notreal` → clear not-found error
+  with a `--version` hint.
+- `jet fmt` on a deliberately-ugly `Main.java` reformats it
+  correctly (open brace placement, indentation, spacing); a second
+  `jet fmt --check` exits 0; reverting and running `jet fmt --check`
+  exits non-zero with the offending file listed.
+
 ## [1.8.0] — 2026-05-11
 
 ### Added

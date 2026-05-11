@@ -218,4 +218,15 @@ pub enum Command {
         /// Target shell: bash, zsh, fish, elvish, powershell
         shell: Shell,
     },
+    /// Show Maven Central metadata for a coordinate
+    Info {
+        /// `group:artifact` (latest stable) or `group:artifact:version`
+        coord: String,
+    },
+    /// Format Java source via google-java-format
+    Fmt {
+        /// Verify formatting without writing — non-zero exit if any file would change
+        #[arg(long)]
+        check: bool,
+    },
 }
