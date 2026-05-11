@@ -230,7 +230,17 @@ lockfile format are stable for the 1.x line. ✅
   and a real recompile is ~210 ms (the cost of `javac` itself).
 - 4 unit tests cover the relevance filter (target/.git/source/create+remove).
 
-## Beyond 1.1 (sketches)
+## 1.2 — "It diagnoses" 🩺  **shipped 2026-05-11**
+
+- [x] **`jet doctor`** — single-pass diagnostic command. Manifest health
+  (parse, edition, recommended fields), workspace + lockfile consistency
+  (members load, no cycles, no legacy locks, no stale entries),
+  toolchain availability (managed JDK or system javac, version match),
+  cache sizes (Maven artifacts, content cache, managed JDKs), build-output
+  orphans, plugins on PATH. Grouped ✓ / ⚠ / ✗ output, exit 1 only on
+  hard errors.
+
+## Beyond 1.2 (sketches)
 
 - **Remote build cache** — shared S3-backed cache, à la Bazel.
 - **Native image** — first-class GraalVM support.

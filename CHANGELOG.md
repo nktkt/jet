@@ -4,6 +4,33 @@ All notable changes to `jet` are documented here. The format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). jet adheres to
 [Semantic Versioning](https://semver.org/) from `1.0.0` onward.
 
+## [1.2.0] — 2026-05-11
+
+### Added
+
+- **`jet doctor`** — diagnoses project + environment issues in one
+  pass, no network, no compilation. Grouped output with ✓ / ⚠ / ✗
+  per finding and a summary line; exits non-zero only on real errors,
+  warnings are advisory.
+
+  Checks covered:
+  - **Manifest**: `jet.toml` parses, `[package].edition` is in
+    `KNOWN_EDITIONS`, recommended fields (`group`, `license`) are
+    set, stray `dep.workspace = true` outside a workspace.
+  - **Workspace & lockfile**: members load, no path-dep cycles, no
+    legacy per-member `jet.lock` files, lockfile is present and
+    contains every declared dep.
+  - **Toolchain**: managed JDK from `[toolchain]` is installed (or
+    system javac is available and matches `[package].java`).
+  - **Caches**: Maven artifact cache + content build cache size
+    + managed JDK count.
+  - **Build outputs**: `target/classes/` doesn't contain orphan
+    directories from renamed/removed workspace members.
+  - **Plugins**: enumerates `jet-*` binaries on PATH.
+
+- 3 unit tests cover the size formatter, the legacy-1.X javac
+  version parser, and the report's error counter.
+
 ## [1.1.0] — 2026-05-11
 
 ### Added

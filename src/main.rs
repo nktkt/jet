@@ -68,6 +68,7 @@ fn main() -> Result<()> {
         }
         Command::Why { coord } => cmd::why::cmd_why(cmd::why::WhyArgs { coord }),
         Command::Plugins => cmd::plugin::cmd_list(),
+        Command::Doctor => cmd::doctor::cmd_doctor(),
         Command::Watch { action } => {
             let action = match action.unwrap_or(WatchAction::Build) {
                 WatchAction::Build => cmd::watch::WatchAction::Build,

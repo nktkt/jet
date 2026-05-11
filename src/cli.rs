@@ -109,6 +109,8 @@ pub enum Command {
     },
     /// Remove build artifacts
     Clean,
+    /// Diagnose project + environment configuration
+    Doctor,
     /// Import a Maven `pom.xml` into a new `jet.toml`
     Import {
         /// Overwrite an existing jet.toml
