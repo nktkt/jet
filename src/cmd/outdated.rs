@@ -11,7 +11,15 @@ use anyhow::Result;
 use crate::manifest::{DepSpec, Manifest};
 use crate::registry;
 
-pub fn cmd_outdated() -> Result<()> {
+pub struct OutdatedArgs {
+    /// Include `-M*`, `-RC*`, `-alpha*`, `-beta*`, `-SNAPSHOT`, `-pre*`,
+    /// `-dev*` versions in the "latest" suggestion. A dep whose current
+    /// pin is itself a prerelease auto-allows prereleases for that dep
+    /// regardless of this flag (so users don't get stuck).
+    pub allow_prereleases: bool,
+}
+
+pub fn cmd_outdated(args: OutdatedArgs) -> Result<()> {
     let cwd = std::env::current_dir()?;
     let root = Manifest::find_root(&cwd)?;
     let manifest = Manifest::load(&root)?;
@@ -28,7 +36,10 @@ pub fn cmd_outdated() -> Result<()> {
     let mut updates = 0usize;
     let mut errors = 0usize;
     for row in &rows {
-        match registry::latest_version(&row.group, &row.artifact) {
+        // Auto-allow prereleases when the existing pin is one — otherwise
+        // a user on `5.13.0-M3` would never get bumped to `5.13.0-M4`.
+        let allow = args.allow_prereleases || registry::is_prerelease(&row.current);
+        match registry::latest_version(&row.group, &row.artifact, allow) {
             Ok(Some(latest)) => {
                 if registry::is_newer(&row.current, &latest) {
                     println!(

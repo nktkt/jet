@@ -284,10 +284,23 @@ lockfile format are stable for the 1.x line. ✅
 - [x] Internal: `Manifest::remove_dep_from_table` and
   `registry::search` round out the dep-CRUD + lookup surface.
 
-## Beyond 1.6 (sketches)
+## 1.7 — "Polish" ✨  **shipped 2026-05-11**
 
-- **Pre-release filtering** — `jet outdated --allow-prereleases` opt-in;
-  default to skipping `-M*`, `-RC*`, `-alpha*`, `-beta*`, `-SNAPSHOT`.
+- [x] **`jet completions <shell>`** — bash/zsh/fish/elvish/powershell
+  scripts emitted via `clap_complete::generate` against the live CLI.
+- [x] **Pre-release filtering** — default `jet outdated` / `jet update`
+  now skip `-M*`, `-RC*`, `-alpha*`, `-beta*`, `-SNAPSHOT`, `-pre*`,
+  `-dev*`. Opt-in with `--allow-prereleases`. Auto-allow when the
+  current pin is already a prerelease.
+- [x] Registry rewritten to use Solr's `core=gav` doc set so we can
+  see every published version, sort with `is_newer`, and pick the
+  highest survivor.
+
+## Beyond 1.7 (sketches)
+
+- **`jet check`** — typecheck without producing class files (skip
+  cache write + resource copy + JAR layout) for the fastest "did I
+  break the build?" loop. Pairs with `jet watch check`.
 - **Workspace-wide update** — sweep every member manifest in one pass.
 - **`jet search --json`** — machine-readable hits for editor plugins.
 - **Remote build cache** — shared S3-backed cache, à la Bazel.

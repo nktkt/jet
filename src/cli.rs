@@ -1,6 +1,7 @@
 use std::ffi::OsString;
 
 use clap::{Parser, Subcommand};
+use clap_complete::Shell;
 
 #[derive(Subcommand, Clone)]
 pub enum WatchAction {
@@ -168,12 +169,22 @@ pub enum Command {
         no_sign: bool,
     },
     /// Check Maven Central for newer dependency versions
-    Outdated,
+    Outdated {
+        /// Consider pre-release versions (-M*, -RC*, -alpha*, -beta*,
+        /// -SNAPSHOT, -pre, -dev). Off by default — stable pins stay
+        /// on stable. Deps whose current pin is itself a prerelease
+        /// always allow prereleases regardless of this flag.
+        #[arg(long)]
+        allow_prereleases: bool,
+    },
     /// Bump dependencies to their latest Maven Central version
     Update {
         /// `group:artifact` (or `group:artifact:version`) to restrict the
         /// update to a single dep. Omit to update every dep in jet.toml.
         coord: Option<String>,
+        /// Same semantics as `jet outdated --allow-prereleases`.
+        #[arg(long)]
+        allow_prereleases: bool,
     },
     /// Remove a dependency from jet.toml and refresh jet.lock
     Remove {
@@ -190,5 +201,10 @@ pub enum Command {
         /// Max number of rows to print
         #[arg(long, default_value_t = 20)]
         limit: usize,
+    },
+    /// Print a shell-completion script for the given shell
+    Completions {
+        /// Target shell: bash, zsh, fish, elvish, powershell
+        shell: Shell,
     },
 }

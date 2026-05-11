@@ -22,6 +22,9 @@ pub struct UpdateArgs {
     /// Optional `group:artifact` (or `group:artifact:version`) restricting the
     /// update to one dep. `None` means "all deps".
     pub coord: Option<String>,
+    /// Mirror of `jet outdated --allow-prereleases`. A dep whose current pin
+    /// is already a prerelease always allows prereleases for that dep.
+    pub allow_prereleases: bool,
 }
 
 pub fn cmd_update(args: UpdateArgs) -> Result<()> {
@@ -47,7 +50,8 @@ pub fn cmd_update(args: UpdateArgs) -> Result<()> {
 
     let mut applied = 0usize;
     for p in &planned {
-        match registry::latest_version(&p.group, &p.artifact) {
+        let allow = args.allow_prereleases || registry::is_prerelease(&p.current);
+        match registry::latest_version(&p.group, &p.artifact, allow) {
             Ok(Some(latest)) => {
                 if registry::is_newer(&p.current, &latest) {
                     Manifest::add_dep_to_table(&manifest_path, p.table, &p.key, &latest)

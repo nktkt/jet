@@ -64,15 +64,25 @@ fn main() -> Result<()> {
         Command::Publish { dry_run, no_sign } => {
             cmd_publish(PublishArgs { dry_run, no_sign })
         }
-        Command::Outdated => cmd::outdated::cmd_outdated(),
-        Command::Update { coord } => {
-            cmd::update::cmd_update(cmd::update::UpdateArgs { coord })
+        Command::Outdated { allow_prereleases } => {
+            cmd::outdated::cmd_outdated(cmd::outdated::OutdatedArgs {
+                allow_prereleases,
+            })
+        }
+        Command::Update { coord, allow_prereleases } => {
+            cmd::update::cmd_update(cmd::update::UpdateArgs {
+                coord,
+                allow_prereleases,
+            })
         }
         Command::Remove { coord, dev } => {
             cmd::remove::cmd_remove(cmd::remove::RemoveArgs { coord, dev })
         }
         Command::Search { query, limit } => {
             cmd::search::cmd_search(cmd::search::SearchArgs { query, limit })
+        }
+        Command::Completions { shell } => {
+            cmd::completions::cmd_completions(cmd::completions::CompletionsArgs { shell })
         }
         Command::Tree { scope } => {
             cmd::tree::cmd_tree(cmd::tree::TreeArgs { scope })

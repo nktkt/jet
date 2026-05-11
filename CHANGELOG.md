@@ -4,6 +4,65 @@ All notable changes to `jet` are documented here. The format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). jet adheres to
 [Semantic Versioning](https://semver.org/) from `1.0.0` onward.
 
+## [1.7.0] — 2026-05-11
+
+### Added
+
+- **`jet completions <shell>`** — emits shell-completion scripts to
+  stdout for `bash`, `zsh`, `fish`, `elvish`, or `powershell`. Built
+  via `clap_complete::generate` against the live `Cli` parser, so the
+  script always reflects the subcommands and flags this build
+  actually supports. Install for zsh:
+  ```
+  jet completions zsh > "$fpath[1]/_jet"
+  ```
+  For bash: `jet completions bash > /usr/local/etc/bash_completion.d/jet`.
+
+- **`jet outdated --allow-prereleases`** and
+  **`jet update --allow-prereleases`** — opt in to milestone (`-M*`),
+  release-candidate (`-RC*`), alpha/beta, snapshot, and `-pre*`/`-dev*`
+  candidates. Closes the known limitation noted in the v1.5
+  changelog. **Default is now stable-only**: the previous behavior of
+  surfacing whatever Maven Central marked `latestVersion` was a
+  papercut for production projects that ended up pinned to milestones
+  by accident.
+
+  Stable-only is implemented by switching the registry query from
+  the rolled-up doc (which exposes only the pre-filtered
+  `latestVersion`) to Solr's `core=gav` doc set (every published
+  version), then filtering with a new `registry::is_prerelease`
+  detector and picking the highest survivor with the existing
+  `is_newer` comparator.
+
+  A dep whose current pin **is itself** a prerelease (e.g.
+  `junit-jupiter = "5.13.0-M1"`) auto-allows prereleases for **that
+  specific dep**, so users on milestone tracks aren't stuck — the
+  default `jet outdated` will still bump them to `5.13.0-M3`.
+
+### Internal
+
+- `registry::latest_version` signature changed to
+  `(group, artifact, allow_prereleases) -> Result<Option<String>>`.
+  Implementation switched to `core=gav&rows=20` Solr query, in-memory
+  sort by `is_newer`, prerelease filter.
+- `registry::is_prerelease(v)` — conservative qualifier detector. A
+  segment counts as prerelease when it starts with one of `m`,
+  `rc`, `alpha`, `beta`, `snapshot`, `pre`, `dev`, `pr`, `preview`
+  *and* the remainder is empty or starts with a digit. So `-M3`,
+  `-rc1`, `-alpha`, `-beta2`, `-SNAPSHOT` flag; `-jre`, `-android`,
+  `-jdk8` (Guava-style classifier suffixes) don't. 2 new unit tests.
+
+### Smoke-tested
+
+- `jet outdated` on `org.junit.jupiter:junit-jupiter = "5.10.0"`
+  reports `5.10.0 → 5.12.2` (skipping `5.13.0-M3`); same command
+  with `--allow-prereleases` restores `5.10.0 → 5.13.0-M3`. Pinning
+  to `5.13.0-M1` and re-running default outdated correctly reports
+  `5.13.0-M1 → 5.13.0-M3` (auto-allow kicked in).
+- `jet completions zsh` produces a `#compdef jet` zsh script;
+  `jet completions bash` produces a `_jet()` bash function; fish
+  variant generates 141 lines of valid fish completion.
+
 ## [1.6.0] — 2026-05-11
 
 ### Added
