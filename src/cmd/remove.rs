@@ -64,6 +64,7 @@ pub fn cmd_remove(args: RemoveArgs) -> Result<()> {
         package: None,
         jobs: None,
         no_cache: false,
+        check_only: false,
     })?;
 
     Ok(())

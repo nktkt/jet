@@ -41,6 +41,7 @@ pub fn cmd_publish(args: PublishArgs) -> Result<()> {
         package: None,
         jobs: None,
         no_cache: false,
+        check_only: false,
     })?;
     let root = outputs.project_root.clone();
     let manifest = outputs.manifest;

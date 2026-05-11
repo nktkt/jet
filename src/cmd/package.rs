@@ -38,7 +38,7 @@ pub fn cmd_package(args: PackageArgs) -> Result<()> {
     // --native implies --uber: native-image needs every transitive class on
     // the input classpath, and a thin JAR alone would miss them.
     let uber = args.uber || args.native;
-    let outputs = do_build(BuildArgs { release: false, force_resolve: false, package: None, jobs: None, no_cache: false })?;
+    let outputs = do_build(BuildArgs { release: false, force_resolve: false, package: None, jobs: None, no_cache: false, check_only: false })?;
     let root = outputs.project_root.clone();
     let manifest = outputs.manifest;
 

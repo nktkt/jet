@@ -25,6 +25,7 @@ const DEBOUNCE: Duration = Duration::from_millis(200);
 #[derive(Clone)]
 pub enum WatchAction {
     Build,
+    Check,
     Test,
     Run { args: Vec<String> },
 }
@@ -207,6 +208,18 @@ fn run_action(action: &WatchAction, child: &mut Option<Child>) {
                 package: None,
                 jobs: None,
                 no_cache: false,
+                check_only: false,
+            })
+        }
+        WatchAction::Check => {
+            use super::build::{BuildArgs, cmd_build};
+            cmd_build(BuildArgs {
+                release: false,
+                force_resolve: false,
+                package: None,
+                jobs: None,
+                no_cache: false,
+                check_only: true,
             })
         }
         WatchAction::Test => {
@@ -237,6 +250,7 @@ fn spawn_run(args: &[String], child: &mut Option<Child>) -> Result<()> {
         package: None,
         jobs: None,
         no_cache: false,
+        check_only: false,
     })?;
     let main_class = match outputs.manifest.pkg()?.main.clone() {
         Some(m) => m,

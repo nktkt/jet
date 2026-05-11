@@ -46,7 +46,7 @@ pub fn cmd_add(args: AddArgs) -> Result<()> {
     // Re-resolve to refresh jet.lock.
     use crate::cmd::build::{BuildArgs, do_build};
     println!("  Resolving dependencies…");
-    do_build(BuildArgs { release: false, force_resolve: true, package: None, jobs: None, no_cache: false })?;
+    do_build(BuildArgs { release: false, force_resolve: true, package: None, jobs: None, no_cache: false, check_only: false })?;
 
     Ok(())
 }

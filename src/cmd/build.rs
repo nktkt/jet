@@ -24,6 +24,11 @@ pub struct BuildArgs {
     pub jobs: Option<usize>,
     /// Skip the content-addressed build cache (`~/Library/Caches/jet/build/`).
     pub no_cache: bool,
+    /// Typecheck-only mode (`jet check`): write `.class` files to a separate
+    /// `target/check/` tree, skip the content-addressed cache (lookup AND
+    /// store), keep per-mode incremental state independent so `jet build`
+    /// and `jet check` don't fight over the same fingerprint file.
+    pub check_only: bool,
 }
 
 /// Build outputs (paths the caller can use). Returned to `run` so it can
@@ -74,9 +79,9 @@ pub fn cmd_build(args: BuildArgs) -> Result<()> {
         std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)
     });
     if jobs > 1 && order.len() > 1 {
-        run_parallel(&workspace, order, target_dir, args.release, args.force_resolve, args.no_cache, jobs)
+        run_parallel(&workspace, order, target_dir, args.release, args.force_resolve, args.no_cache, args.check_only, jobs)
     } else {
-        run_sequential(&workspace, order, target_dir, args.release, args.force_resolve, args.no_cache)
+        run_sequential(&workspace, order, target_dir, args.release, args.force_resolve, args.no_cache, args.check_only)
     }
 }
 
@@ -87,6 +92,7 @@ fn run_sequential(
     release: bool,
     force_resolve: bool,
     no_cache: bool,
+    check_only: bool,
 ) -> Result<()> {
     let mut built: HashMap<usize, BuildOutputs> = HashMap::new();
     for idx in order {
@@ -102,6 +108,7 @@ fn run_sequential(
             extra,
             Some(workspace.root.clone()),
             no_cache,
+            check_only,
         )?;
         built.insert(idx, outputs);
     }
@@ -115,6 +122,7 @@ fn run_parallel(
     release: bool,
     force_resolve: bool,
     no_cache: bool,
+    check_only: bool,
     jobs: usize,
 ) -> Result<()> {
     use std::sync::{Arc, Mutex};
@@ -200,6 +208,7 @@ fn run_parallel(
                 extras,
                 Some((*workspace_root_for_worker).clone()),
                 no_cache,
+                check_only,
             )?;
             built_for_worker.lock().unwrap().insert(idx, outputs);
             Ok(())
@@ -288,6 +297,7 @@ pub fn do_build(args: BuildArgs) -> Result<BuildOutputs> {
         Vec::new(),
         None,
         args.no_cache,
+        args.check_only,
     )
 }
 
@@ -311,26 +321,36 @@ pub fn do_build_at(
     extra_classpath: Vec<PathBuf>,
     workspace_root: Option<PathBuf>,
     no_cache: bool,
+    check_only: bool,
 ) -> Result<BuildOutputs> {
     let started = Instant::now();
     let prefix = match &member {
         Some(name) => format!("[{name}] "),
         None => String::new(),
     };
+    let verb = if check_only { "Checking" } else { "Building" };
     println!(
-        "{prefix}Building `{}` v{} (Java {})",
+        "{prefix}{verb} `{}` v{} (Java {})",
         manifest.pkg()?.name,
         manifest.pkg()?.version,
         manifest.pkg()?.java
     );
-    let args = BuildArgs { release, force_resolve, package: None, jobs: None, no_cache };
+    let args = BuildArgs {
+        release, force_resolve, package: None, jobs: None, no_cache, check_only,
+    };
 
-    // Workspace-aware path layout. Single-project keeps the legacy paths.
-    let classes_dir = match (&member, release) {
-        (Some(m), true) => target_dir.join("release/classes").join(m),
-        (Some(m), false) => target_dir.join("classes").join(m),
-        (None, true) => target_dir.join("release/classes"),
-        (None, false) => target_dir.join("classes"),
+    // Workspace-aware path layout. `check_only` carves out a separate
+    // `target/check/classes/` subtree so a subsequent `jet build` doesn't
+    // see typecheck outputs as stale build outputs to recompile against.
+    let classes_dir = match (&member, release, check_only) {
+        (_, _, true) => match &member {
+            Some(m) => target_dir.join("check/classes").join(m),
+            None => target_dir.join("check/classes"),
+        },
+        (Some(m), true, false) => target_dir.join("release/classes").join(m),
+        (Some(m), false, false) => target_dir.join("classes").join(m),
+        (None, true, false) => target_dir.join("release/classes"),
+        (None, false, false) => target_dir.join("classes"),
     };
     let info_dir = match &member {
         Some(m) => target_dir.join("jet-info").join(m),
@@ -406,7 +426,11 @@ pub fn do_build_at(
     // 4. Incremental check.
     let cache_dir = info_dir.clone();
     fs::create_dir_all(&cache_dir).ok();
-    let cache_path = cache_dir.join(if args.release { "build-release.json" } else { "build.json" });
+    let cache_path = cache_dir.join(match (args.release, args.check_only) {
+        (_, true) => "check.json",
+        (true, false) => "build-release.json",
+        (false, false) => "build.json",
+    });
 
     let fingerprint = compute_fingerprint(
         &manifest,
@@ -422,8 +446,9 @@ pub fn do_build_at(
         && prior.as_ref().map(|p| &p.fingerprint) == Some(&fingerprint.fingerprint)
     {
         let elapsed = started.elapsed();
+        let verb = if args.check_only { "Type check up-to-date" } else { "Up-to-date" };
         println!(
-            "{prefix}Up-to-date ({:.0}ms)",
+            "{prefix}{verb} ({:.0}ms)",
             elapsed.as_secs_f64() * 1000.0
         );
         return Ok(BuildOutputs {
@@ -438,7 +463,11 @@ pub fn do_build_at(
     // 4b. Content-addressed cache lookup. Same fingerprint → restore from
     // ~/Library/Caches/jet/build/<hash>/ instead of running javac. This
     // catches branch switches, CI restores, and revert/edit cycles.
-    if !args.no_cache {
+    //
+    // Skipped in check_only: typecheck output is throwaway and we don't
+    // want to populate the shared cache from a separate `target/check/`
+    // tree that might have different compiler flags down the line.
+    if !args.no_cache && !args.check_only {
         if let Ok(Some(cache)) = crate::build_cache::ContentCache::open() {
             match cache.try_restore(&fingerprint.fingerprint, &classes_dir) {
                 Ok(true) => {
@@ -492,8 +521,10 @@ pub fn do_build_at(
         .with_context(|| format!("writing {}", cache_path.display()))?;
 
     // 6b. Snapshot to the content-addressed cache so a future invocation
-    // with the same inputs can skip javac entirely.
-    if !args.no_cache {
+    // with the same inputs can skip javac entirely. Skipped in check_only
+    // — typecheck output is throwaway and lives in `target/check/` which
+    // we don't want to share with build cache entries.
+    if !args.no_cache && !args.check_only {
         if let Ok(Some(cache)) = crate::build_cache::ContentCache::open() {
             if let Err(e) = cache.store(&fingerprint.fingerprint, &classes_dir) {
                 eprintln!("{prefix}warning: cache store failed: {e:#}");
@@ -502,8 +533,9 @@ pub fn do_build_at(
     }
 
     let elapsed = started.elapsed();
+    let verb = if args.check_only { "Type-checked" } else { "Compiled" };
     println!(
-        "{prefix}Compiled {} source files in {:.0}ms",
+        "{prefix}{verb} {} source files in {:.0}ms",
         sources.len(),
         elapsed.as_secs_f64() * 1000.0
     );

@@ -7,6 +7,8 @@ use clap_complete::Shell;
 pub enum WatchAction {
     /// Re-run `jet build` on every change (default)
     Build,
+    /// Re-run `jet check` (typecheck only) on every change — fastest feedback
+    Check,
     /// Re-run `jet test` on every change
     Test,
     /// Spawn the main class on each successful build; kill + respawn on change
@@ -73,6 +75,15 @@ pub enum Command {
         /// Do not run `git init` (also skipped if .git/ already exists)
         #[arg(long)]
         no_vcs: bool,
+    },
+    /// Typecheck the current project without producing class outputs in `target/classes/`
+    Check {
+        /// Limit to a specific workspace member (and its path-dep ancestors)
+        #[arg(short = 'p', long)]
+        package: Option<String>,
+        /// Number of parallel build jobs (default: available_parallelism)
+        #[arg(short = 'j', long)]
+        jobs: Option<usize>,
     },
     /// Compile the current project
     Build {

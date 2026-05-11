@@ -296,12 +296,25 @@ lockfile format are stable for the 1.x line. ✅
   see every published version, sort with `is_newer`, and pick the
   highest survivor.
 
-## Beyond 1.7 (sketches)
+## 1.8 — "Fast feedback" ⚡  **shipped 2026-05-11**
 
-- **`jet check`** — typecheck without producing class files (skip
-  cache write + resource copy + JAR layout) for the fastest "did I
-  break the build?" loop. Pairs with `jet watch check`.
-- **Workspace-wide update** — sweep every member manifest in one pass.
+- [x] **`jet check`** — typecheck-only mode that runs the full build
+  pipeline but writes class outputs under `target/check/classes/`,
+  bypasses the content-addressed cache in both directions, and
+  tracks `target/jet-info/check.json` independently of `build.json`.
+- [x] **`jet watch check`** — fastest TDD-style loop jet offers;
+  warm-path edits hit javac's own speed; back-to-back unchanged
+  saves return 0 ms via per-mode incremental.
+- [x] `BuildArgs.check_only` threaded through 10 call sites and the
+  `do_build_at` workspace pipeline.
+
+## Beyond 1.8 (sketches)
+
+- **`jet bench`** — JMH wrapper, à la `cargo bench`.
+- **`jet fmt`** — wrap google-java-format or palantir-java-format.
+- **`jet info <coord>`** — show latest, license, scm, dependencies
+  for a Maven Central coord without adding it.
+- **Workspace-wide `jet update`** — sweep every member manifest in one pass.
 - **`jet search --json`** — machine-readable hits for editor plugins.
 - **Remote build cache** — shared S3-backed cache, à la Bazel.
 - **Kotlin / Scala** — second-class but workable, via the existing toolchain hook.

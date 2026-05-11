@@ -49,7 +49,11 @@ fn main() -> Result<()> {
             package,
             jobs,
             no_cache,
+            check_only: false,
         }),
+        Command::Check { package, jobs } => {
+            cmd::check::cmd_check(cmd::check::CheckArgs { package, jobs })
+        }
         Command::Run { args } => cmd_run(RunArgs { args }),
         Command::Test { filter } => cmd_test(TestArgs { filter }),
         Command::Add { coord, no_verify, dev } => {
@@ -93,6 +97,7 @@ fn main() -> Result<()> {
         Command::Watch { action } => {
             let action = match action.unwrap_or(WatchAction::Build) {
                 WatchAction::Build => cmd::watch::WatchAction::Build,
+                WatchAction::Check => cmd::watch::WatchAction::Check,
                 WatchAction::Test => cmd::watch::WatchAction::Test,
                 WatchAction::Run { args } => cmd::watch::WatchAction::Run { args },
             };

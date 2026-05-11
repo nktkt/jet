@@ -89,6 +89,7 @@ pub fn cmd_update(args: UpdateArgs) -> Result<()> {
         package: None,
         jobs: None,
         no_cache: false,
+        check_only: false,
     })?;
 
     Ok(())

@@ -27,7 +27,7 @@ pub fn cmd_test(args: TestArgs) -> Result<()> {
     let started = Instant::now();
 
     // 1. Build main first (fail-fast if main doesn't compile).
-    let main = do_build(BuildArgs { release: false, force_resolve: false, package: None, jobs: None, no_cache: false })?;
+    let main = do_build(BuildArgs { release: false, force_resolve: false, package: None, jobs: None, no_cache: false, check_only: false })?;
     let root = main.project_root.clone();
 
     // 2. Resolve main + dev deps unified, regenerate jet.lock if needed.

@@ -4,6 +4,73 @@ All notable changes to `jet` are documented here. The format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). jet adheres to
 [Semantic Versioning](https://semver.org/) from `1.0.0` onward.
 
+## [1.8.0] — 2026-05-11
+
+### Added
+
+- **`jet check`** — typecheck-only mode. Runs the full `do_build`
+  pipeline (dep resolution, JAR fetch, javac invocation) so
+  diagnostics are exactly what `jet build` would produce, but with
+  three deliberate carve-outs to keep it lean and to keep it from
+  fighting with the regular build:
+  - Class outputs land under `target/check/classes/` (workspace
+    members get `target/check/classes/<member>/`). `target/classes/`
+    is untouched, so a subsequent `jet build` doesn't see typecheck
+    artifacts as stale outputs to mistrust.
+  - The content-addressed build cache is bypassed in **both**
+    directions — no lookup (we want fresh diagnostics) and no store
+    (typecheck output is throwaway; we don't want the build cache
+    populated from a separate compile destination).
+  - Per-mode incremental state lives in `target/jet-info/check.json`,
+    independent of `build.json` / `build-release.json`, so the
+    "up-to-date" flag for `jet check` doesn't get reset by a
+    `jet build` in between, and vice versa.
+
+  Output reads:
+  ```
+  Checking `app` v0.1.0 (Java 21)
+  Type-checked 1 source files in 213ms
+  ```
+  And on the warm path:
+  ```
+  Checking `app` v0.1.0 (Java 21)
+  Type check up-to-date (0ms)
+  ```
+  Compile errors propagate verbatim from javac with a non-zero
+  exit status — `jet check` is suitable for pre-commit hooks and
+  CI fast-fail steps.
+
+- **`jet watch check`** — extends the existing v1.1 watcher with a
+  `Check` action that calls `jet check` instead of `jet build` on
+  each save. The 0ms warm path from per-mode incremental tracking
+  makes this the fastest TDD-style loop jet offers: hot edits land
+  at `javac`'s own speed (~210 ms on a single-source project) and
+  back-to-back unchanged saves cost only the watcher debounce.
+
+### Internal
+
+- `BuildArgs` gains `check_only: bool`. `do_build_at` threads it
+  through every constructor (10 call sites updated: `add`, `build`,
+  `package`, `publish`, `remove`, `run`, `test`, `update`, `watch`
+  × 2). Workspace path layout learned a `target/check/classes/`
+  branch alongside `target/classes/` and `target/release/classes/`.
+- `cmd::build::do_build_at` now picks the per-mode `cache_path`
+  via a `match (release, check_only)` triple, and gates content-
+  cache lookup AND store on `!args.check_only`.
+- `cmd::watch::WatchAction::Check` mirrors the existing `Build`
+  arm, just with `check_only: true` on the embedded `BuildArgs`.
+
+### Smoke-tested
+
+- `jet check` on a fresh project: cold = 213 ms, warm = 0 ms.
+- `jet build` after `jet check`: cold = 202 ms (its own first-run);
+  warm = 0 ms (check's `target/check/` did not pollute build state).
+- `target/` tree after both modes shows `classes/` and
+  `check/classes/` as siblings; `jet-info/` carries both
+  `build.json` and `check.json`.
+- Intentional compile error (`String x = 1;`): `jet check` exits 1
+  and prints javac's diagnostic verbatim.
+
 ## [1.7.0] — 2026-05-11
 
 ### Added
