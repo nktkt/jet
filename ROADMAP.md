@@ -166,12 +166,57 @@ Performance pass. The point at which `jet` should outclass Gradle on a cold cach
 
 **Verified end-to-end:** A demo project with `com.google.guava:guava:33.0.0-jre` shows the full 7-deep tree under `jet tree`, traces `jet why com.google.code.findbugs:jsr305` to the 2-hop path through Guava, reports the right "not in this project" message for an unrelated coord, and dispatches `jet hello world --foo bar` to a hand-rolled `jet-hello` shell script on PATH (with env vars and argv preserved). Unknown subcommands without a matching plugin error out with the built-in command list.
 
-## 1.0 — "It is stable" 🎯
+## 1.0 — "It is stable" 🎯  **shipped 2026-05-11**
 
-- [ ] `jet.toml` schema frozen with versioning (`edition = "2026"`)
-- [ ] Plugin API stable
-- [ ] Migration guide from Maven and Gradle, with importer (`jet import`)
-- [ ] Documented release cadence and deprecation policy
+- [x] **Schema frozen with `edition = "2026"`**. `PackageMeta.edition`
+  validated against `KNOWN_EDITIONS = ["2026"]`; future jet versions add
+  new editions but keep parsing `"2026"`. `jet new` writes `edition =
+  "2026"` into every fresh manifest. Unknown editions error with a
+  copy-pastable hint (`upgrade jet, or pin one of the known editions`).
+- [x] **Plugin API stable** (already shipped in 0.9; locked in 1.0). The
+  contract — `jet <name>` → `jet-<name>` on PATH with `JET_PROJECT_ROOT`
+  + `JET_VERSION` env, forwarded argv — will hold for the entire 1.x line.
+  Documented in `README.md` under "Plugin protocol (1.0)".
+- [x] **Migration importer (`jet import`)**. Reads `pom.xml` via the
+  existing `quick-xml`-based POM parser, extracts coords + Java version
+  (from `maven.compiler.{release,target}` or `java.version`, with
+  legacy `1.X` prefix stripping) + properties, interpolates `${...}`
+  references against the POM's `<properties>`, maps scopes
+  (`compile`/`runtime` → `[dependencies]`, `test` → `[dev-dependencies]`,
+  `provided`/`system`/`import` → skipped with explanatory warning), and
+  writes a properly-formatted `jet.toml`. `--force` to overwrite.
+- [x] **Release cadence + deprecation policy** documented in
+  `CHANGELOG.md`. SemVer; patch as needed; minor every ~6 weeks
+  additive only; major only when unavoidable, pre-announced through a
+  full minor cycle. Deprecations announced in CLI (`warning:` line),
+  in `CHANGELOG.md`, and remain functional through the next major.
+- [x] **`CHANGELOG.md`** with every release from 0.1 → 1.0.
+
+**Verified end-to-end:**
+
+```
+$ jet --version
+jet 1.0.0
+
+$ jet new demo  # writes `edition = "2026"` into jet.toml
+
+$ jet import  # in a dir with pom.xml
+  Wrote .../jet.toml
+    [package] my-service:2.4.1 (group io.example.imported, java 21)
+    2 main + 1 dev deps imported.
+  note: skipping `jakarta.servlet:jakarta.servlet-api`
+        (scope=`provided` is JVM-level; doesn't translate to jet)
+  Next: `jet build` to resolve transitives and write jet.lock.
+
+$ jet build  # on a jet.toml with edition = "2099"
+Caused by:
+  [package].edition = "2099" is not known to this jet (1.0.0).
+  Known editions: 2026.
+  help: upgrade jet, or pin one of the known editions.
+```
+
+**Exit criteria:** Manifest schema, CLI surface, plugin protocol, and
+lockfile format are stable for the 1.x line. ✅
 
 ---
 

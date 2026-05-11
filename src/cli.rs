@@ -101,6 +101,12 @@ pub enum Command {
     },
     /// Remove build artifacts
     Clean,
+    /// Import a Maven `pom.xml` into a new `jet.toml`
+    Import {
+        /// Overwrite an existing jet.toml
+        #[arg(long)]
+        force: bool,
+    },
     /// Print the resolved dependency tree
     Tree {
         /// Restrict to a single scope (compile, runtime, test, dev)

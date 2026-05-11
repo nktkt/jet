@@ -27,6 +27,7 @@ pub fn render_manifest(name: &str, version: &str, java: u32) -> String {
          name    = \"{name}\"\n\
          version = \"{version}\"\n\
          java    = {java}\n\
+         edition = \"2026\"\n\
          \n\
          [dependencies]\n\
          \n\

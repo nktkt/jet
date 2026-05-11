@@ -283,6 +283,7 @@ impl Workspace {
                 name: "workspace_root".into(),
                 version: "0.0.0".into(),
                 java: 21,
+                edition: None,
                 group: None,
                 package: None,
                 main: None,

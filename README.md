@@ -3,7 +3,7 @@
 > A fast, modern build tool for the JVM. Inspired by [Cargo](https://doc.rust-lang.org/cargo/) and [Bun](https://bun.sh).
 
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
-[![Status: pre-alpha](https://img.shields.io/badge/status-pre--alpha-orange.svg)](#status)
+[![Status: 1.0](https://img.shields.io/badge/status-1.0-brightgreen.svg)](CHANGELOG.md)
 
 `jet` is an experiment in answering one question: **what would a Java build tool look like if it were designed in 2026 instead of inheriting decisions from 2004?**
 
@@ -37,9 +37,11 @@ jet package             # produce a jar (or uber-jar)
 
 ## Status
 
-**Pre-alpha — not usable yet.** Currently scaffolding the CLI surface and project structure. See the [Roadmap](./ROADMAP.md) for what is planned and what is in progress.
-
-If `jet` sounds interesting, the most useful thing you can do today is **open an issue** with what would make you switch from your current build tool.
+**1.0 — stable.** The manifest schema, CLI surface, plugin protocol, and
+lockfile format are frozen for the `1.x` line. See [CHANGELOG.md](./CHANGELOG.md)
+for the release history and the [Roadmap](./ROADMAP.md) for what's
+already in the box (everything 0.1 → 1.0). Post-1.0 work (registries,
+remote build cache, native image, watch mode) is tracked under "Beyond 1.0".
 
 ## Why another build tool?
 
@@ -112,6 +114,23 @@ cargo build --release
 ```
 
 Requires Rust 1.85+ (edition 2024) and a JDK on `PATH` for end-to-end testing.
+
+## Plugin protocol (1.0)
+
+`jet` plugins are external executables on `PATH`, named `jet-<name>`. When
+`jet <name>` doesn't match a built-in command, jet forwards to
+`jet-<name>` with the remaining `argv` and the following environment:
+
+| Variable           | Set when                              | Value                          |
+|--------------------|---------------------------------------|--------------------------------|
+| `JET_PROJECT_ROOT` | a `jet.toml` is found by walking up   | absolute path to project root  |
+| `JET_VERSION`      | always                                | jet's `CARGO_PKG_VERSION`      |
+
+This contract is frozen for the `1.x` line. A plugin is a single
+executable in any language — Bash, Python, Go, anything that can read
+`JET_PROJECT_ROOT` and emit text.
+
+`jet plugins` lists every `jet-*` binary visible on `PATH`.
 
 ## Contributing
 

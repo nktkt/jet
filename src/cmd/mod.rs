@@ -1,6 +1,7 @@
 pub mod add;
 pub mod build;
 pub mod clean;
+pub mod import;
 pub mod init;
 pub mod jdk;
 pub mod new;

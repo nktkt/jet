@@ -68,6 +68,9 @@ fn main() -> Result<()> {
         }
         Command::Why { coord } => cmd::why::cmd_why(cmd::why::WhyArgs { coord }),
         Command::Plugins => cmd::plugin::cmd_list(),
+        Command::Import { force } => {
+            cmd::import::cmd_import(cmd::import::ImportArgs { force })
+        }
         Command::External(args) => {
             let mut iter = args.into_iter();
             let name = iter

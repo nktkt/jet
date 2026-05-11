@@ -200,6 +200,7 @@ mod tests {
                 name: "demo".into(),
                 version: "1.2.3".into(),
                 java: 21,
+                edition: None,
                 group: Some(group.into()),
                 package: None,
                 main: None,

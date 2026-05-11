@@ -141,6 +141,12 @@ pub struct PackageMeta {
     pub name: String,
     pub version: String,
     pub java: u32,
+    /// Schema edition (`"2026"` for jet 1.0). Pinning the edition lets future
+    /// jet releases evolve the manifest format without breaking projects on
+    /// older schemas. Defaults to `"2026"` when absent — pre-1.0 jet.toml
+    /// files keep parsing.
+    #[serde(default)]
+    pub edition: Option<String>,
     #[serde(default)]
     pub group: Option<String>,
     #[serde(default)]
@@ -154,6 +160,10 @@ pub struct PackageMeta {
     #[serde(default)]
     pub description: Option<String>,
 }
+
+/// Manifest editions jet knows how to parse. Future versions add new
+/// strings here without removing old ones.
+pub const KNOWN_EDITIONS: &[&str] = &["2026"];
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
@@ -320,6 +330,17 @@ impl Manifest {
                     pkg.java
                 );
             }
+            if let Some(ed) = pkg.edition.as_deref() {
+                if !KNOWN_EDITIONS.contains(&ed) {
+                    bail!(
+                        "[package].edition = \"{ed}\" is not known to this jet ({}). \
+                         Known editions: {}.\n\
+                         help: upgrade jet, or pin one of the known editions.",
+                        env!("CARGO_PKG_VERSION"),
+                        KNOWN_EDITIONS.join(", "),
+                    );
+                }
+            }
         } else if self.workspace.is_none() {
             bail!("jet.toml must contain either [package] or [workspace]");
         }
@@ -452,6 +473,33 @@ main = "io.example.demo.Main"
         assert_eq!(m.dev_dependencies.len(), 1);
         assert_eq!(m.dependencies["org.slf4j:slf4j-api"].version(), "2.0.13");
         assert_eq!(m.dependencies["com.google.guava:guava"].version(), "33.0.0-jre");
+    }
+
+    #[test]
+    fn accepts_known_edition() {
+        let s = r#"
+[package]
+name    = "x"
+version = "0.1.0"
+java    = 21
+edition = "2026"
+"#;
+        let m = Manifest::from_str(s).unwrap();
+        assert_eq!(m.pkg().unwrap().edition.as_deref(), Some("2026"));
+    }
+
+    #[test]
+    fn rejects_unknown_edition() {
+        let s = r#"
+[package]
+name    = "x"
+version = "0.1.0"
+java    = 21
+edition = "2099"
+"#;
+        let err = Manifest::from_str(s).err().expect("should reject");
+        let msg = format!("{err:#}");
+        assert!(msg.contains("edition") && msg.contains("2099"), "got: {msg}");
     }
 
     #[test]
