@@ -240,7 +240,17 @@ lockfile format are stable for the 1.x line. ✅
   orphans, plugins on PATH. Grouped ✓ / ⚠ / ✗ output, exit 1 only on
   hard errors.
 
-## Beyond 1.2 (sketches)
+## 1.3 — "Hot reload" 🔥  **shipped 2026-05-11**
+
+- [x] **`jet watch run [-- args]`** — Spring Boot devtools-style hot
+  reload. Spawns the main class on startup and again after each rebuild,
+  killing the prior child via `Child::kill()` before the next spawn.
+  Args after `--` forwarded to the program. Stdio inherited so output
+  appears live. With the v0.7 cache, each respawn cycle is ~220 ms.
+  Reuses `jet run`'s main-class detection (`[package].main` →
+  `target/classes` scan).
+
+## Beyond 1.3 (sketches)
 
 - **Remote build cache** — shared S3-backed cache, à la Bazel.
 - **Native image** — first-class GraalVM support.

@@ -73,6 +73,7 @@ fn main() -> Result<()> {
             let action = match action.unwrap_or(WatchAction::Build) {
                 WatchAction::Build => cmd::watch::WatchAction::Build,
                 WatchAction::Test => cmd::watch::WatchAction::Test,
+                WatchAction::Run { args } => cmd::watch::WatchAction::Run { args },
             };
             cmd::watch::cmd_watch(cmd::watch::WatchArgs { action })
         }

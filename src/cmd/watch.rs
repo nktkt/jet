@@ -7,10 +7,11 @@
 //! sub-second; the loop runs until Ctrl-C.
 
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
+use std::process::{Child, Command};
+use std::sync::mpsc::{RecvTimeoutError, channel};
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use notify::{
     Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher, event::ModifyKind,
 };
@@ -19,10 +20,11 @@ use crate::manifest::Manifest;
 
 const DEBOUNCE: Duration = Duration::from_millis(200);
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub enum WatchAction {
     Build,
     Test,
+    Run { args: Vec<String> },
 }
 
 pub struct WatchArgs {
@@ -52,8 +54,12 @@ pub fn cmd_watch(args: WatchArgs) -> Result<()> {
 
     eprintln!("[watch] watching {watch_paths_display} (Ctrl-C to stop)");
 
+    // For `watch run`: holds the currently-running child process, killed and
+    // respawned on each rebuild. None for `build`/`test`.
+    let mut child: Option<Child> = None;
+
     // Initial run.
-    run_action(args.action);
+    run_action(&args.action, &mut child);
 
     // Event loop. After any relevant event arrives, drain the channel for
     // DEBOUNCE ms to coalesce, then run.
@@ -84,7 +90,11 @@ pub fn cmd_watch(args: WatchArgs) -> Result<()> {
             }
         }
         eprintln!("[watch] changes detected — rerunning");
-        run_action(args.action);
+        run_action(&args.action, &mut child);
+    }
+    if let Some(mut c) = child.take() {
+        let _ = c.kill();
+        let _ = c.wait();
     }
     Ok(())
 }
@@ -140,7 +150,13 @@ fn is_relevant(event: &Event, root: &Path) -> bool {
     )
 }
 
-fn run_action(action: WatchAction) {
+fn run_action(action: &WatchAction, child: &mut Option<Child>) {
+    // Always reap any previously-spawned `watch run` child before re-building.
+    if let Some(mut c) = child.take() {
+        eprintln!("[watch] stopping previous run (pid {})…", c.id());
+        let _ = c.kill();
+        let _ = c.wait();
+    }
     let started = Instant::now();
     let result = match action {
         WatchAction::Build => {
@@ -157,6 +173,7 @@ fn run_action(action: WatchAction) {
             use super::test::{TestArgs, cmd_test};
             cmd_test(TestArgs { filter: None })
         }
+        WatchAction::Run { args } => spawn_run(args, child),
     };
     let elapsed = started.elapsed();
     match result {
@@ -164,6 +181,51 @@ fn run_action(action: WatchAction) {
         Err(e) => eprintln!("[watch] failed in {:.0}ms: {e:#}", elapsed.as_secs_f64() * 1000.0),
     }
     eprintln!("[watch] waiting for changes…");
+}
+
+/// Build the project, then spawn the main class as a child process. The
+/// spawned child is stored in `*child` so the next rebuild can kill it
+/// before respawning.
+fn spawn_run(args: &[String], child: &mut Option<Child>) -> Result<()> {
+    use super::build::{BuildArgs, do_build};
+    use crate::classes::detect_main_classes;
+    use crate::javac::{find_java_for, join_classpath};
+
+    let outputs = do_build(BuildArgs {
+        release: false,
+        force_resolve: false,
+        package: None,
+        jobs: None,
+        no_cache: false,
+    })?;
+    let main_class = match outputs.manifest.pkg()?.main.clone() {
+        Some(m) => m,
+        None => {
+            let candidates = detect_main_classes(&outputs.classes_dir)?;
+            match candidates.len() {
+                0 => bail!(
+                    "no `public static void main(String[])` found in `{}`. \
+                     Set `[package].main` in jet.toml.",
+                    outputs.classes_dir.display()
+                ),
+                1 => candidates.into_iter().next().unwrap(),
+                _ => bail!(
+                    "multiple main classes found: [{}]. Set `[package].main` to disambiguate.",
+                    candidates.join(", ")
+                ),
+            }
+        }
+    };
+    let java = find_java_for(&outputs.manifest)?;
+    let cp = join_classpath(&outputs.classpath);
+    let mut cmd = Command::new(&java);
+    cmd.arg("-cp").arg(cp).arg(&main_class).args(args);
+    let c = cmd
+        .spawn()
+        .with_context(|| format!("spawning {}", java.display()))?;
+    eprintln!("[watch] started `{main_class}` (pid {})", c.id());
+    *child = Some(c);
+    Ok(())
 }
 
 #[cfg(test)]

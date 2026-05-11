@@ -8,6 +8,12 @@ pub enum WatchAction {
     Build,
     /// Re-run `jet test` on every change
     Test,
+    /// Spawn the main class on each successful build; kill + respawn on change
+    Run {
+        /// Arguments forwarded to the Java program
+        #[arg(last = true)]
+        args: Vec<String>,
+    },
 }
 
 #[derive(Subcommand)]

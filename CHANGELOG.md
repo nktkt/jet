@@ -4,6 +4,25 @@ All notable changes to `jet` are documented here. The format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). jet adheres to
 [Semantic Versioning](https://semver.org/) from `1.0.0` onward.
 
+## [1.3.0] — 2026-05-11
+
+### Added
+
+- **`jet watch run [-- args]`** — hot-reload for long-running Java
+  programs. On startup, builds and spawns the main class as a child
+  process. On every source change: kills the prior child, rebuilds,
+  and spawns a fresh one with the same forwarded args. The
+  `[watch] started <Main> (pid N)` / `[watch] stopping previous run
+  (pid N)…` lines make the lifecycle explicit. Stdio is inherited so
+  application output appears directly. Each respawn cycle is ~220 ms
+  on a single-source project thanks to the v0.7 content-addressed
+  cache.
+
+  Verified by spawning a `Thread.sleep(500)`-loop, editing the
+  source twice mid-flight, and watching three distinct PIDs come up
+  in sequence (each printing the updated literal) while the prior
+  PID dies before the next one starts.
+
 ## [1.2.0] — 2026-05-11
 
 ### Added
