@@ -17,7 +17,7 @@ mod toolchain;
 mod validate;
 mod workspace;
 
-use cli::{Cli, Command, JdkCommand};
+use cli::{Cli, Command, JdkCommand, WatchAction};
 use cmd::add::{AddArgs, cmd_add};
 use cmd::build::{BuildArgs, cmd_build};
 use cmd::clean::cmd_clean;
@@ -68,6 +68,13 @@ fn main() -> Result<()> {
         }
         Command::Why { coord } => cmd::why::cmd_why(cmd::why::WhyArgs { coord }),
         Command::Plugins => cmd::plugin::cmd_list(),
+        Command::Watch { action } => {
+            let action = match action.unwrap_or(WatchAction::Build) {
+                WatchAction::Build => cmd::watch::WatchAction::Build,
+                WatchAction::Test => cmd::watch::WatchAction::Test,
+            };
+            cmd::watch::cmd_watch(cmd::watch::WatchArgs { action })
+        }
         Command::Import { force } => {
             cmd::import::cmd_import(cmd::import::ImportArgs { force })
         }

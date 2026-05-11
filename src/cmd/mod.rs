@@ -12,4 +12,5 @@ pub mod run;
 mod scaffold;
 pub mod test;
 pub mod tree;
+pub mod watch;
 pub mod why;

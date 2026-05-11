@@ -220,9 +220,18 @@ lockfile format are stable for the 1.x line. ✅
 
 ---
 
-## Beyond 1.0 (sketches)
+## 1.1 — "Watch mode" 👀  **shipped 2026-05-11**
 
-- **Watch mode** — `jet watch` recompiles + reruns tests on save (Bun-style).
+- [x] **`jet watch [build|test]`** — recursively watches sources + `jet.toml`,
+  debounces editor multi-saves to 200 ms, ignores `target/`/`.git/`/`.jet/`/
+  `node_modules/`, and reruns the chosen command on each batch. Defaults
+  to `build`; `jet watch test` for a TDD red-green loop. Built on the
+  v0.7 content-addressed cache, so a no-op rebuild after a save is 1 ms
+  and a real recompile is ~210 ms (the cost of `javac` itself).
+- 4 unit tests cover the relevance filter (target/.git/source/create+remove).
+
+## Beyond 1.1 (sketches)
+
 - **Remote build cache** — shared S3-backed cache, à la Bazel.
 - **Native image** — first-class GraalVM support.
 - **Kotlin / Scala** — second-class but workable, via the existing toolchain hook.

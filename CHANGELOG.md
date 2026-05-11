@@ -4,6 +4,21 @@ All notable changes to `jet` are documented here. The format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). jet adheres to
 [Semantic Versioning](https://semver.org/) from `1.0.0` onward.
 
+## [1.1.0] — 2026-05-11
+
+### Added
+
+- **`jet watch [build|test]`** — recursively watches `src/main/java`,
+  `src/main/resources`, `src/test/java`, `src/test/resources`, and
+  `jet.toml`, debounces editor save bursts to 200 ms, and re-runs the
+  chosen command on each batch. Ignores `target/`, `.git/`, `.jet/`,
+  and `node_modules/`. Defaults to `build`; `jet watch test` for the
+  red-green loop. Runs until Ctrl-C.
+- Combined with the 0.7 content-addressed cache, warm rebuilds in
+  `jet watch` measure 1 ms when nothing semantic changed; the hot path
+  (single source edit) lands at ~210 ms — the time `javac` itself
+  takes. A burst of three rapid edits coalesces into one rebuild.
+
 ## [1.0.0] — 2026-05-11
 
 ### Stability promise

@@ -2,6 +2,14 @@ use std::ffi::OsString;
 
 use clap::{Parser, Subcommand};
 
+#[derive(Subcommand, Clone)]
+pub enum WatchAction {
+    /// Re-run `jet build` on every change (default)
+    Build,
+    /// Re-run `jet test` on every change
+    Test,
+}
+
 #[derive(Subcommand)]
 pub enum JdkCommand {
     /// List jet-managed JDKs installed under ~/.jet/jdks/
@@ -106,6 +114,11 @@ pub enum Command {
         /// Overwrite an existing jet.toml
         #[arg(long)]
         force: bool,
+    },
+    /// Watch source files and re-run build (default) or test on change
+    Watch {
+        #[command(subcommand)]
+        action: Option<WatchAction>,
     },
     /// Print the resolved dependency tree
     Tree {
