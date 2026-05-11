@@ -4,6 +4,27 @@ All notable changes to `jet` are documented here. The format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). jet adheres to
 [Semantic Versioning](https://semver.org/) from `1.0.0` onward.
 
+## [1.3.1] — 2026-05-11
+
+### Fixed
+
+- **`jet watch run`** now installs SIGTERM and SIGINT handlers and
+  reaps the spawned Java child before returning. Previously, sending
+  SIGTERM to `jet watch` left the last child running because Rust's
+  default SIGTERM action is termination — our cleanup code never ran.
+  The fix uses `signal-hook` to flip an `AtomicBool` and changes the
+  event loop to poll with `recv_timeout(200ms)` so the flag is checked
+  even when nothing is happening. Verified by `kill -TERM` and
+  `kill -INT` on a running `jet watch run`: in both cases the log
+  shows `[watch] shutting down… stopping watch run child (pid N)` and
+  the Java child is gone within a second.
+
+### Internal
+
+- New `install_signal_handler` helper, cfg-gated for Unix vs Windows
+  (Windows registers only SIGINT since SIGTERM has no user-deliverable
+  analog).
+
 ## [1.3.0] — 2026-05-11
 
 ### Added

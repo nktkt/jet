@@ -8,6 +8,8 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{RecvTimeoutError, channel};
 use std::time::{Duration, Instant};
 
@@ -54,6 +56,14 @@ pub fn cmd_watch(args: WatchArgs) -> Result<()> {
 
     eprintln!("[watch] watching {watch_paths_display} (Ctrl-C to stop)");
 
+    // SIGINT (Ctrl-C) and SIGTERM both flip this flag; the main loop polls
+    // it on every recv timeout so cleanup runs deterministically rather than
+    // relying on the default termination behavior. Without this, a SIGTERM
+    // sent only to the jet process leaves a `watch run` child orphaned;
+    // with it, both are reaped.
+    let shutdown = Arc::new(AtomicBool::new(false));
+    install_signal_handler(Arc::clone(&shutdown))?;
+
     // For `watch run`: holds the currently-running child process, killed and
     // respawned on each rebuild. None for `build`/`test`.
     let mut child: Option<Child> = None;
@@ -61,16 +71,20 @@ pub fn cmd_watch(args: WatchArgs) -> Result<()> {
     // Initial run.
     run_action(&args.action, &mut child);
 
-    // Event loop. After any relevant event arrives, drain the channel for
-    // DEBOUNCE ms to coalesce, then run.
-    loop {
-        let first = match rx.recv() {
+    // Event loop. Polls in DEBOUNCE-sized timeouts so the shutdown flag is
+    // checked at least every 200 ms even when nothing is happening.
+    'outer: loop {
+        if shutdown.load(Ordering::SeqCst) {
+            break;
+        }
+        let first = match rx.recv_timeout(DEBOUNCE) {
             Ok(Ok(ev)) => ev,
             Ok(Err(e)) => {
                 eprintln!("[watch] notify error: {e:#}; continuing");
                 continue;
             }
-            Err(_) => break, // watcher dropped
+            Err(RecvTimeoutError::Timeout) => continue, // re-check shutdown flag
+            Err(RecvTimeoutError::Disconnected) => break, // watcher dropped
         };
         if !is_relevant(&first, &root) {
             continue;
@@ -78,6 +92,9 @@ pub fn cmd_watch(args: WatchArgs) -> Result<()> {
         // Drain follow-up events within the debounce window.
         let deadline = Instant::now() + DEBOUNCE;
         loop {
+            if shutdown.load(Ordering::SeqCst) {
+                break 'outer;
+            }
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
                 break;
@@ -86,16 +103,39 @@ pub fn cmd_watch(args: WatchArgs) -> Result<()> {
                 Ok(Ok(_ev)) => {} // swallow
                 Ok(Err(_)) => {}  // swallow notify errors mid-batch
                 Err(RecvTimeoutError::Timeout) => break,
-                Err(RecvTimeoutError::Disconnected) => return Ok(()),
+                Err(RecvTimeoutError::Disconnected) => break 'outer,
             }
         }
         eprintln!("[watch] changes detected — rerunning");
         run_action(&args.action, &mut child);
     }
+
+    eprintln!("[watch] shutting down…");
     if let Some(mut c) = child.take() {
+        eprintln!("[watch] stopping `watch run` child (pid {})…", c.id());
         let _ = c.kill();
         let _ = c.wait();
     }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn install_signal_handler(flag: Arc<AtomicBool>) -> Result<()> {
+    use signal_hook::consts::{SIGINT, SIGTERM};
+    signal_hook::flag::register(SIGTERM, Arc::clone(&flag))
+        .context("registering SIGTERM handler")?;
+    signal_hook::flag::register(SIGINT, flag)
+        .context("registering SIGINT handler")?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn install_signal_handler(flag: Arc<AtomicBool>) -> Result<()> {
+    // On Windows, only Ctrl-C is meaningful; SIGTERM equivalents don't exist
+    // as user-deliverable signals. signal-hook supports SIGINT here too.
+    use signal_hook::consts::SIGINT;
+    signal_hook::flag::register(SIGINT, flag)
+        .context("registering SIGINT handler")?;
     Ok(())
 }
 
