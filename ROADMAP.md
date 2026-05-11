@@ -250,7 +250,18 @@ lockfile format are stable for the 1.x line. ✅
   Reuses `jet run`'s main-class detection (`[package].main` →
   `target/classes` scan).
 
-## Beyond 1.3 (sketches)
+## 1.4 — "Native image" 🦅  **shipped 2026-05-11**
+
+- [x] **`jet package --native`** — invokes GraalVM `native-image` after
+  building the uber JAR. Produces a standalone `target/<name>` binary
+  that runs without a JVM. Locates `native-image` via `PATH` then
+  `$JAVA_HOME/bin/`; errors with a `brew install --cask graalvm-jdk`
+  / official-downloads hint if not found, but only after the uber JAR
+  has already been written.
+- [x] Bug fix in 1.4: `--uber` on a no-deps project no longer early-returns
+  before subsequent steps run (was blocking `--native` on simple projects).
+
+## Beyond 1.4 (sketches)
 
 - **Remote build cache** — shared S3-backed cache, à la Bazel.
 - **Native image** — first-class GraalVM support.

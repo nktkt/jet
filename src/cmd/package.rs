@@ -28,10 +28,16 @@ use crate::resolver::{Fetcher, default_repos};
 
 pub struct PackageArgs {
     pub uber: bool,
+    /// After packaging, invoke GraalVM `native-image` on the resulting JAR.
+    /// Implies `--uber` so every class is available to the AOT compiler.
+    pub native: bool,
 }
 
 pub fn cmd_package(args: PackageArgs) -> Result<()> {
     let started = Instant::now();
+    // --native implies --uber: native-image needs every transitive class on
+    // the input classpath, and a thin JAR alone would miss them.
+    let uber = args.uber || args.native;
     let outputs = do_build(BuildArgs { release: false, force_resolve: false, package: None, jobs: None, no_cache: false })?;
     let root = outputs.project_root.clone();
     let manifest = outputs.manifest;
@@ -44,7 +50,7 @@ pub fn cmd_package(args: PackageArgs) -> Result<()> {
     // 1. META-INF/ + MANIFEST.MF (manifest content built once `--uber` adds
     // entries; manifest itself doesn't depend on dep contents).
     builder.put(Entry::dir("META-INF"));
-    let manifest_body = build_manifest(&manifest, main_class.as_deref(), args.uber)?;
+    let manifest_body = build_manifest(&manifest, main_class.as_deref(), uber)?;
     builder.put(Entry::file("META-INF/MANIFEST.MF", manifest_body));
 
     // 2. Project's compiled classes.
@@ -57,16 +63,11 @@ pub fn cmd_package(args: PackageArgs) -> Result<()> {
     }
 
     // 4. Uber mode: walk dep JARs.
-    if args.uber {
+    let no_deps =
+        manifest.dependencies.is_empty() && !root.join(LOCKFILE_NAME).exists();
+    if uber && !no_deps {
         let fetcher = Fetcher::new(default_repos())?;
-        let lockfile = match Lockfile::load(&root) {
-            Ok(l) => l,
-            Err(e) if !root.join(LOCKFILE_NAME).exists() && manifest.dependencies.is_empty() => {
-                eprintln!("  note: no jet.lock and no dependencies; skipping ({e:#})");
-                return write_jar(&builder, &output_path(&outputs.target_dir, &manifest, args.uber)?, started);
-            }
-            Err(e) => return Err(e),
-        };
+        let lockfile = Lockfile::load(&root)?;
 
         let dep_jars = fetch_main_jars(&fetcher, &lockfile)?;
         let mut services: HashMap<String, Vec<String>> = HashMap::new();
@@ -95,14 +96,93 @@ pub fn cmd_package(args: PackageArgs) -> Result<()> {
     }
 
     // 5. Write JAR.
-    let out = output_path(&outputs.target_dir, &manifest, args.uber)?;
+    let out = output_path(&outputs.target_dir, &manifest, uber)?;
     write_jar(&builder, &out, started)?;
 
     // 6. Print warnings (after success).
     for w in &warnings {
         eprintln!("  warning: {w}");
     }
+
+    // 7. Optional GraalVM native-image step.
+    if args.native {
+        build_native_image(&manifest, &out, &outputs.target_dir)?;
+    }
     Ok(())
+}
+
+/// Locate `native-image` and turn the uber JAR into a standalone native
+/// executable at `<target_dir>/<name>` (or `<name>.exe` on Windows).
+fn build_native_image(
+    manifest: &Manifest,
+    jar: &Path,
+    target_dir: &Path,
+) -> Result<()> {
+    let native_image = find_native_image()?;
+    let pkg = manifest.pkg()?;
+    let out_name = if cfg!(windows) {
+        format!("{}.exe", pkg.name)
+    } else {
+        pkg.name.clone()
+    };
+    let out_path = target_dir.join(&pkg.name); // native-image appends .exe on Windows itself
+
+    println!(
+        "  Building native image from {} (this can take a minute)…",
+        jar.display()
+    );
+    let started = std::time::Instant::now();
+    let status = std::process::Command::new(&native_image)
+        .arg("-jar").arg(jar)
+        .arg("-o").arg(&out_path)
+        .arg("--no-fallback") // refuse to embed a fallback JVM
+        .status()
+        .with_context(|| format!("spawning {}", native_image.display()))?;
+    if !status.success() {
+        bail!(
+            "`native-image` failed (exit {}). \
+             Check the output above for missing reflection/resource config.",
+            status.code().map(|c| c.to_string()).unwrap_or_else(|| "signal".into())
+        );
+    }
+    let final_path = target_dir.join(&out_name);
+    let size = fs::metadata(&final_path).map(|m| m.len()).unwrap_or(0);
+    println!(
+        "  Built native image {} ({:.1} MB) in {:.1}s",
+        final_path.display(),
+        size as f64 / 1024.0 / 1024.0,
+        started.elapsed().as_secs_f64()
+    );
+    Ok(())
+}
+
+/// Locate the `native-image` binary. Tries (in order):
+/// 1. `PATH` lookup via `which`
+/// 2. `$JAVA_HOME/bin/native-image` (when a GraalVM-style JDK is selected)
+fn find_native_image() -> Result<PathBuf> {
+    let exe = if cfg!(windows) { "native-image.exe" } else { "native-image" };
+    if let Ok(p) = which::which(exe) {
+        return Ok(p);
+    }
+    if let Ok(home) = std::env::var("JAVA_HOME") {
+        let candidate = Path::new(&home).join("bin").join(exe);
+        if candidate.is_file() {
+            return Ok(candidate);
+        }
+    }
+    bail!(
+        "`native-image` not found on PATH or in $JAVA_HOME/bin.
+
+`jet package --native` needs a GraalVM-based JDK with the
+native-image component installed.
+
+How to install on macOS:
+  brew install --cask graalvm-jdk
+  export PATH=\"$(/usr/libexec/java_home -v 25-graal)/bin:$PATH\"
+
+Linux / Windows: download from https://www.graalvm.org/downloads/
+"
+    )
 }
 
 fn output_path(target_dir: &Path, manifest: &Manifest, uber: bool) -> Result<PathBuf> {

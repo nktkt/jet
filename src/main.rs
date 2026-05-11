@@ -59,7 +59,7 @@ fn main() -> Result<()> {
             JdkCommand::List => cmd::jdk::cmd_list(),
             JdkCommand::Install { version, vendor } => cmd::jdk::cmd_install(version, vendor),
         },
-        Command::Package { uber } => cmd_package(PackageArgs { uber }),
+        Command::Package { uber, native } => cmd_package(PackageArgs { uber, native }),
         Command::Publish { dry_run, no_sign } => {
             cmd_publish(PublishArgs { dry_run, no_sign })
         }

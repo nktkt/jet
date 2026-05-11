@@ -4,6 +4,31 @@ All notable changes to `jet` are documented here. The format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). jet adheres to
 [Semantic Versioning](https://semver.org/) from `1.0.0` onward.
 
+## [1.4.0] — 2026-05-11
+
+### Added
+
+- **`jet package --native`** — GraalVM Ahead-of-Time compilation.
+  Implies `--uber` so every transitive class is on the input
+  classpath, then invokes `native-image -jar <jar> -o <binary>
+  --no-fallback` to produce a standalone executable at
+  `target/<name>` (or `target/<name>.exe` on Windows). The resulting
+  binary needs no JVM at runtime.
+
+- `find_native_image()` looks up the binary via `which`, then
+  `$JAVA_HOME/bin/native-image`. When neither is found, the error
+  message points at `brew install --cask graalvm-jdk` for macOS and
+  the official download page for Linux/Windows. The uber JAR is
+  still produced before the native step runs, so a missing GraalVM
+  doesn't waste the build work.
+
+### Fixed
+
+- `jet package --uber` no longer early-returns when a project has no
+  dependencies. The lockfile-loading branch is now conditional on
+  `manifest.dependencies` being non-empty or `jet.lock` existing,
+  letting the post-pack code path (warnings, `--native`) run uniformly.
+
 ## [1.3.1] — 2026-05-11
 
 ### Fixed

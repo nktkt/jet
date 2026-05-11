@@ -146,6 +146,9 @@ pub enum Command {
         /// Build a self-contained uber JAR (bundles all main dependencies)
         #[arg(long)]
         uber: bool,
+        /// Also produce a GraalVM native image (implies --uber)
+        #[arg(long)]
+        native: bool,
     },
     /// Manage jet-installed JDK toolchains under ~/.jet/jdks/
     Jdk {
