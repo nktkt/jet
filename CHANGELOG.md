@@ -4,6 +4,85 @@ All notable changes to `jet` are documented here. The format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). jet adheres to
 [Semantic Versioning](https://semver.org/) from `1.0.0` onward.
 
+## [1.10.0] — 2026-05-11
+
+### Added
+
+- **`jet audit [--ignore <id,id,...>]`** — security scan against
+  [OSV.dev](https://osv.dev). Walks `jet.lock`, packages every
+  `Maven:<group:artifact>` coord into a single
+  `POST /v1/querybatch`, then `GET /v1/vulns/<id>` for each
+  unique advisory returned (deduplication matters — one CVE
+  typically hits multiple coords in a transitive closure). Output
+  is sorted by severity (CRITICAL > HIGH > MODERATE > LOW >
+  UNKNOWN), each entry shows ID, CVSS vector, one-line summary,
+  NVD/GHSA advisory link, and the affected `group:artifact =
+  "version" [scope]` rows. Exits non-zero on any unignored finding
+  — wire into CI like `jet audit || exit 1` for a hard gate.
+
+  `--ignore GHSA-599f-7c49-w659,CVE-2022-42889` suppresses
+  specific advisory IDs the team has reviewed and accepted (e.g.
+  test-only deps, unreachable code paths). Ignored findings are
+  counted in the summary line but don't fail the run.
+
+  Verified on a deliberately-vulnerable project with
+  `org.apache.commons:commons-text = "1.9"`: 15 real
+  vulnerabilities surfaced across 51 transitive packages
+  (Text4Shell plus the cascade of ant / commons-io /
+  commons-beanutils / commons-lang transitives), each with a
+  reachable advisory link.
+
+- **`jet licenses [--detail] [--scope <s>]`** — aggregate the
+  licenses of every transitive dependency for compliance. Default
+  output groups packages by license name with counts:
+  ```
+  51 packages, 15 distinct license entries
+
+    Apache-2.0  (8 packages)
+      biz.aQute.bnd:biz.aQute.bndlib = "5.1.1"  [compile]
+      com.beust:jcommander = "1.72"  [compile]
+      ...
+    BSD-3-Clause  (6 packages)
+      ...
+  ```
+  `--detail` switches to a flat per-package listing with aligned
+  columns. `--scope` accepts `compile`, `runtime`, `test`, or
+  `all` (default: compile + runtime — the production grant
+  surface). A small built-in normalizer collapses common spelling
+  variants ("Apache License, Version 2.0", "The Apache Software
+  License, Version 2.0", "Apache-2.0" → `Apache-2.0`) so the
+  output reflects distinct *legal* grants rather than distinct
+  free-text strings.
+
+### Internal
+
+- New `cmd/audit.rs` uses ureq for both endpoints. Severity
+  picker prefers `CVSS_V3` > `CVSS_V2` > anything, with a
+  conservative textual bucketing pass (`critical|high|moderate|
+  medium|low`) before falling back to the raw vector. 3 new unit
+  tests cover the ordering, the V3 preference, and the
+  ADVISORY-type URL preference.
+- New `cmd/licenses.rs` reuses the v1.9 `parse_info` POM
+  extractor (now `pub(crate)` along with the `Info` / `License`
+  / `DepRow` types — the v1.9 module was the natural home for
+  POM-metadata parsing and exposing it avoids a duplicate
+  parser). License-name normalization is built-in for the
+  ~12 most-frequent Maven Central spellings; everything else
+  passes through verbatim. 2 new unit tests cover the
+  normalizer's known aliases and the `--scope` validator.
+
+### Smoke-tested
+
+- `jet audit` on the vulnerable smoke project lists 15 findings,
+  highest severity first; `--ignore` correctly drops the
+  Text4Shell advisory and reports the reduced count.
+- `jet licenses` on the same project: 51 packages, 15 distinct
+  license entries, Apache-2.0 aggregated to 8 packages, "(no
+  license declared)" cleanly groups POMs that declare licenses
+  only in a parent (parent-chain resolution is a v1.11 candidate).
+- `jet licenses --detail` aligns coord columns; `--scope all`
+  picks up test-scope deps too.
+
 ## [1.9.0] — 2026-05-11
 
 ### Added

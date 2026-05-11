@@ -229,4 +229,19 @@ pub enum Command {
         #[arg(long)]
         check: bool,
     },
+    /// Scan jet.lock for known vulnerabilities via OSV.dev
+    Audit {
+        /// Comma-separated advisory IDs (GHSA-*, CVE-*) to suppress
+        #[arg(long)]
+        ignore: Option<String>,
+    },
+    /// Aggregate the licenses of every transitive dependency
+    Licenses {
+        /// Show per-package detail instead of grouping by license name
+        #[arg(long)]
+        detail: bool,
+        /// `compile`, `runtime`, `test`, or `all` (default: compile+runtime)
+        #[arg(long)]
+        scope: Option<String>,
+    },
 }

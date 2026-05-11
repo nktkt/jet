@@ -56,26 +56,26 @@ pub fn cmd_info(args: InfoArgs) -> Result<()> {
 }
 
 #[derive(Default)]
-struct Info {
-    name: Option<String>,
-    description: Option<String>,
-    url: Option<String>,
-    licenses: Vec<License>,
-    scm_url: Option<String>,
-    scm_connection: Option<String>,
-    deps: Vec<DepRow>,
+pub(crate) struct Info {
+    pub(crate) name: Option<String>,
+    pub(crate) description: Option<String>,
+    pub(crate) url: Option<String>,
+    pub(crate) licenses: Vec<License>,
+    pub(crate) scm_url: Option<String>,
+    pub(crate) scm_connection: Option<String>,
+    pub(crate) deps: Vec<DepRow>,
 }
 
-struct License {
-    name: Option<String>,
-    url: Option<String>,
+pub(crate) struct License {
+    pub(crate) name: Option<String>,
+    pub(crate) url: Option<String>,
 }
 
-struct DepRow {
-    group: String,
-    artifact: String,
-    version: Option<String>,
-    scope: Option<String>,
+pub(crate) struct DepRow {
+    pub(crate) group: String,
+    pub(crate) artifact: String,
+    pub(crate) version: Option<String>,
+    pub(crate) scope: Option<String>,
 }
 
 fn parse_coord(s: &str) -> Result<(String, String, Option<String>)> {
@@ -165,7 +165,7 @@ fn print_info(group: &str, artifact: &str, version: &str, info: &Info) {
     println!("  add: jet add {group}:{artifact}:{version}");
 }
 
-fn parse_info(xml: &[u8]) -> Result<Info> {
+pub(crate) fn parse_info(xml: &[u8]) -> Result<Info> {
     let mut reader = Reader::from_reader(xml);
     reader.config_mut().trim_text(true);
 

@@ -321,14 +321,32 @@ lockfile format are stable for the 1.x line. ✅
 - [x] New `src/tools.rs` module hosts on-demand external-tool
   binaries; future homes: Checkstyle, JMH runner, SpotBugs.
 
-## Beyond 1.9 (sketches)
+## 1.10 — "Supply-chain guardrails" 🛡️  **shipped 2026-05-11**
 
+- [x] **`jet audit [--ignore <id,…>]`** — OSV.dev batch scan
+  against `jet.lock`, sorted by severity, with per-advisory
+  details (CVSS vector, NVD/GHSA link, affected coords).
+  Non-zero exit on findings makes this CI-gate-ready.
+- [x] **`jet licenses [--detail] [--scope <s>]`** — aggregate
+  the licenses of every transitive dependency with built-in
+  SPDX normalization for the most-frequent Maven Central
+  spellings.
+- [x] `cmd/info.rs::parse_info` promoted to `pub(crate)` so
+  `cmd/licenses.rs` can reuse the POM metadata extractor
+  without duplicating the parser.
+
+## Beyond 1.10 (sketches)
+
+- **Parent-chain license resolution** — many Maven Central POMs
+  declare `<licenses>` only in their parent; walking the parent
+  chain would cut `jet licenses`'s "(no license declared)" count
+  significantly.
 - **`jet bench`** — JMH wrapper, à la `cargo bench`.
-- **`jet fmt`** custom config — palantir-java-format / AOSP /
-  custom rules via a `[fmt]` table in `jet.toml`.
+- **`jet fmt` config** — palantir-java-format / AOSP / custom rules
+  via a `[fmt]` table in `jet.toml`.
 - **Workspace-wide `jet update`** — sweep every member manifest in one pass.
-- **`jet search --json`** / **`jet info --json`** — machine-readable
-  hits for editor plugins.
+- **`jet search --json`** / **`jet info --json`** / **`jet audit --json`** —
+  machine-readable output for editor plugins.
 - **Remote build cache** — shared S3-backed cache, à la Bazel.
 - **Kotlin / Scala** — second-class but workable, via the existing toolchain hook.
 

@@ -1,4 +1,5 @@
 pub mod add;
+pub mod audit;
 pub mod build;
 pub mod check;
 pub mod clean;
@@ -9,6 +10,7 @@ pub mod import;
 pub mod info;
 pub mod init;
 pub mod jdk;
+pub mod licenses;
 pub mod new;
 pub mod outdated;
 pub mod package;

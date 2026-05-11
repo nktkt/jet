@@ -95,6 +95,12 @@ fn main() -> Result<()> {
         Command::Fmt { check } => {
             cmd::fmt::cmd_fmt(cmd::fmt::FmtArgs { check })
         }
+        Command::Audit { ignore } => {
+            cmd::audit::cmd_audit(cmd::audit::AuditArgs { ignore })
+        }
+        Command::Licenses { detail, scope } => {
+            cmd::licenses::cmd_licenses(cmd::licenses::LicensesArgs { detail, scope })
+        }
         Command::Tree { scope } => {
             cmd::tree::cmd_tree(cmd::tree::TreeArgs { scope })
         }
