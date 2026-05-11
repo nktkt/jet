@@ -273,11 +273,23 @@ lockfile format are stable for the 1.x line. ✅
 - [x] New `src/registry.rs` with `latest_version` HTTP helper and an
   `is_newer` segment-wise comparator (6 unit tests).
 
-## Beyond 1.5 (sketches)
+## 1.6 — "Find and forget" 🔍  **shipped 2026-05-11**
+
+- [x] **`jet remove <coord> [--dev]`** — counterpart to `jet add`.
+  Drops the dep via `toml_edit` (comments survive) and regenerates
+  `jet.lock`. Wrong-table errors point at the right `--dev` flag.
+- [x] **`jet search <query> [--limit N]`** — Maven Central free-text
+  search (or Solr field expressions). Output formatted ready to paste
+  into `[dependencies]`.
+- [x] Internal: `Manifest::remove_dep_from_table` and
+  `registry::search` round out the dep-CRUD + lookup surface.
+
+## Beyond 1.6 (sketches)
 
 - **Pre-release filtering** — `jet outdated --allow-prereleases` opt-in;
   default to skipping `-M*`, `-RC*`, `-alpha*`, `-beta*`, `-SNAPSHOT`.
 - **Workspace-wide update** — sweep every member manifest in one pass.
+- **`jet search --json`** — machine-readable hits for editor plugins.
 - **Remote build cache** — shared S3-backed cache, à la Bazel.
 - **Kotlin / Scala** — second-class but workable, via the existing toolchain hook.
 

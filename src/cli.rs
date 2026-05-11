@@ -175,4 +175,20 @@ pub enum Command {
         /// update to a single dep. Omit to update every dep in jet.toml.
         coord: Option<String>,
     },
+    /// Remove a dependency from jet.toml and refresh jet.lock
+    Remove {
+        /// Coordinate in `group:artifact` (or `group:artifact:version`) form
+        coord: String,
+        /// Remove from [dev-dependencies] instead of [dependencies]
+        #[arg(long)]
+        dev: bool,
+    },
+    /// Search Maven Central for a coordinate
+    Search {
+        /// Free-text query, or a Solr field expression (e.g. `g:io.netty`)
+        query: String,
+        /// Max number of rows to print
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+    },
 }

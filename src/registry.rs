@@ -57,6 +57,68 @@ struct SolrDoc {
     latest_version: String,
 }
 
+/// One row in the result of a Maven Central free-text search.
+pub struct SearchHit {
+    pub group: String,
+    pub artifact: String,
+    pub latest_version: String,
+}
+
+#[derive(serde::Deserialize)]
+struct SolrSearchResponse {
+    response: SolrSearchInner,
+}
+
+#[derive(serde::Deserialize)]
+struct SolrSearchInner {
+    docs: Vec<SolrSearchDoc>,
+}
+
+#[derive(serde::Deserialize)]
+struct SolrSearchDoc {
+    g: String,
+    a: String,
+    #[serde(rename = "latestVersion")]
+    latest_version: String,
+}
+
+/// Free-text search across Maven Central. `query` is passed through as the
+/// Solr `q` parameter; users can write plain words (`guava`), field-scoped
+/// queries (`g:com.google.guava`), or full coords (`g:com.google.guava AND
+/// a:guava`). Results are capped at `limit`.
+pub fn search(query: &str, limit: usize) -> Result<Vec<SearchHit>> {
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(10))
+        .timeout_read(Duration::from_secs(15))
+        .user_agent(concat!("jet/", env!("CARGO_PKG_VERSION")))
+        .build();
+
+    let url = format!(
+        "{SEARCH_URL}?q={}&rows={limit}&wt=json",
+        urlencode(query),
+    );
+    let resp = match agent.get(&url).call() {
+        Ok(r) => r,
+        Err(ureq::Error::Status(code, _)) => bail!("HTTP {code} from {url}"),
+        Err(e) => bail!("HTTP error {e} for {url}"),
+    };
+    let mut body = String::new();
+    resp.into_reader().read_to_string(&mut body)
+        .with_context(|| format!("reading response from {url}"))?;
+    let parsed: SolrSearchResponse = serde_json::from_str(&body)
+        .with_context(|| format!("parsing search.maven.org response for `{query}`"))?;
+    Ok(parsed
+        .response
+        .docs
+        .into_iter()
+        .map(|d| SearchHit {
+            group: d.g,
+            artifact: d.a,
+            latest_version: d.latest_version,
+        })
+        .collect())
+}
+
 /// Minimal URL-encoder for Solr query strings. The chars we actually pass in
 /// (`a-z 0-9 . _ -` plus `:` and space inside the q value) need just a few
 /// replacements; we don't need a full percent-encoder.

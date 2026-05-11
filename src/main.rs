@@ -68,6 +68,12 @@ fn main() -> Result<()> {
         Command::Update { coord } => {
             cmd::update::cmd_update(cmd::update::UpdateArgs { coord })
         }
+        Command::Remove { coord, dev } => {
+            cmd::remove::cmd_remove(cmd::remove::RemoveArgs { coord, dev })
+        }
+        Command::Search { query, limit } => {
+            cmd::search::cmd_search(cmd::search::SearchArgs { query, limit })
+        }
         Command::Tree { scope } => {
             cmd::tree::cmd_tree(cmd::tree::TreeArgs { scope })
         }

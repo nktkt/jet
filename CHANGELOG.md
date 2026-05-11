@@ -4,6 +4,54 @@ All notable changes to `jet` are documented here. The format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). jet adheres to
 [Semantic Versioning](https://semver.org/) from `1.0.0` onward.
 
+## [1.6.0] — 2026-05-11
+
+### Added
+
+- **`jet remove <coord> [--dev]`** — the missing counterpart to
+  `jet add`. Drops the named dep from `[dependencies]` (or
+  `[dev-dependencies]` with `--dev`) via `toml_edit` so comments and
+  formatting around the rest of the manifest survive intact, then
+  regenerates `jet.lock` via `do_build(force_resolve = true)`. Coord
+  may be `group:artifact` or `group:artifact:version` (the version
+  segment is ignored — the manifest key has only group + artifact).
+  When the dep is in the *other* table, the error helpfully suggests
+  the correct invocation:
+  ```
+  Error: dependency `org.junit.jupiter:junit-jupiter` is in
+  [dev-dependencies], not [dependencies] (try `jet remove --dev
+  org.junit.jupiter:junit-jupiter`)
+  ```
+
+- **`jet search <query> [--limit N]`** — free-text search across
+  Maven Central, à la `cargo search` / `bun pm search`. The query
+  is passed through to the same Solr endpoint used by
+  `jet outdated`/`update`, so callers can write plain words
+  (`guava`) or field-scoped expressions (`g:com.google.guava`,
+  `g:io.netty AND a:netty-handler`). Default `--limit` is 20.
+  Output rows are formatted as `"group:artifact" = "latest"` so they
+  can be pasted directly into `[dependencies]`:
+  ```
+    "com.google.guava:guava-gwt"     = "33.4.8-jre"
+    "com.google.guava:guava-testlib" = "33.4.8-jre"
+    "com.google.guava:guava-bom"     = "33.4.8-jre"
+  ```
+
+### Internal
+
+- New `Manifest::remove_dep_from_table(path, table, key) -> Result<bool>`
+  helper (preserves comments via `toml_edit`, atomic-writes through
+  a `.toml.tmp` rename). Returns `false` when the key was already
+  absent so callers can produce a precise error.
+- New `registry::search(query, limit) -> Vec<SearchHit>` exposes the
+  Solr `q` parameter directly; `SearchHit` carries `group`, `artifact`,
+  and `latest_version` so future commands (`jet search --json`,
+  `jet add --interactive`) can reuse the structured rows.
+- 5 new unit tests (`remove_dep_preserves_comments_and_siblings`,
+  `parse_key_two_or_three_segments`, `parse_key_rejects_bad`, and 2
+  smoke-paths exercised in the integration suite via the release
+  binary).
+
 ## [1.5.0] — 2026-05-11
 
 ### Added

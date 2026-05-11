@@ -421,6 +421,37 @@ impl Manifest {
         Ok(())
     }
 
+    /// Drop a dependency from the given top-level table, preserving everything
+    /// else. Returns `Ok(true)` when the key was present and removed,
+    /// `Ok(false)` when the key (or the whole table) didn't exist —
+    /// callers decide whether that's an error.
+    pub fn remove_dep_from_table(
+        manifest_path: &Path,
+        table: &str,
+        key: &str,
+    ) -> Result<bool> {
+        let text = fs::read_to_string(manifest_path)
+            .with_context(|| format!("reading {}", manifest_path.display()))?;
+        let mut doc: DocumentMut = text
+            .parse()
+            .with_context(|| format!("parsing {}", manifest_path.display()))?;
+
+        let removed = match doc.get_mut(table).and_then(|i| i.as_table_mut()) {
+            Some(deps) => deps.remove(key).is_some(),
+            None => false,
+        };
+        if !removed {
+            return Ok(false);
+        }
+
+        let tmp = manifest_path.with_extension("toml.tmp");
+        fs::write(&tmp, doc.to_string())
+            .with_context(|| format!("writing {}", tmp.display()))?;
+        fs::rename(&tmp, manifest_path)
+            .with_context(|| format!("renaming {} → {}", tmp.display(), manifest_path.display()))?;
+        Ok(true)
+    }
+
     /// Default Java package, e.g. `com.example.my_app`. Bails on virtual manifests.
     #[allow(dead_code)]
     pub fn java_package(&self) -> Result<String> {
@@ -552,6 +583,50 @@ java = 21
 "#;
         let err = Manifest::from_str(s).err().expect("should reject ranges");
         assert!(format!("{err:#}").contains("range"));
+    }
+
+    #[test]
+    fn remove_dep_preserves_comments_and_siblings() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("jet.toml");
+        fs::write(
+            &path,
+            r#"# project header
+[package]
+name    = "hello"
+version = "0.1.0"
+java    = 21
+
+[dependencies]
+# slf4j is required for logging
+"org.slf4j:slf4j-api"   = "2.0.13"
+"com.google.guava:guava" = "33.0.0-jre"
+"#,
+        )
+        .unwrap();
+
+        let removed = Manifest::remove_dep_from_table(
+            &path,
+            "dependencies",
+            "com.google.guava:guava",
+        )
+        .unwrap();
+        assert!(removed);
+
+        let txt = fs::read_to_string(&path).unwrap();
+        assert!(txt.contains("# project header"));
+        assert!(txt.contains("# slf4j is required for logging"));
+        assert!(txt.contains("\"org.slf4j:slf4j-api\""));
+        assert!(!txt.contains("guava"));
+
+        // A second remove on the same key returns false.
+        let again = Manifest::remove_dep_from_table(
+            &path,
+            "dependencies",
+            "com.google.guava:guava",
+        )
+        .unwrap();
+        assert!(!again);
     }
 
     #[test]
