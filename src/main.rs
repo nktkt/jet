@@ -11,6 +11,7 @@ mod javac;
 mod lockfile;
 mod manifest;
 mod pom;
+mod registry;
 mod resolver;
 mod template;
 mod toolchain;
@@ -62,6 +63,10 @@ fn main() -> Result<()> {
         Command::Package { uber, native } => cmd_package(PackageArgs { uber, native }),
         Command::Publish { dry_run, no_sign } => {
             cmd_publish(PublishArgs { dry_run, no_sign })
+        }
+        Command::Outdated => cmd::outdated::cmd_outdated(),
+        Command::Update { coord } => {
+            cmd::update::cmd_update(cmd::update::UpdateArgs { coord })
         }
         Command::Tree { scope } => {
             cmd::tree::cmd_tree(cmd::tree::TreeArgs { scope })

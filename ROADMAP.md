@@ -261,12 +261,25 @@ lockfile format are stable for the 1.x line. ✅
 - [x] Bug fix in 1.4: `--uber` on a no-deps project no longer early-returns
   before subsequent steps run (was blocking `--native` on simple projects).
 
-## Beyond 1.4 (sketches)
+## 1.5 — "It stays fresh" 🌿  **shipped 2026-05-11**
 
+- [x] **`jet outdated`** — queries Maven Central's Solr search
+  endpoint for each `[dependencies]` and `[dev-dependencies]` entry,
+  prints `key : current → latest [table]` rows for anything stale.
+- [x] **`jet update [coord]`** — bumps `jet.toml` in place (preserving
+  comments via `toml_edit`) to the newest published version, then
+  regenerates `jet.lock` via `do_build(force_resolve = true)`.
+  Optional `group:artifact` argument restricts to one dep.
+- [x] New `src/registry.rs` with `latest_version` HTTP helper and an
+  `is_newer` segment-wise comparator (6 unit tests).
+
+## Beyond 1.5 (sketches)
+
+- **Pre-release filtering** — `jet outdated --allow-prereleases` opt-in;
+  default to skipping `-M*`, `-RC*`, `-alpha*`, `-beta*`, `-SNAPSHOT`.
+- **Workspace-wide update** — sweep every member manifest in one pass.
 - **Remote build cache** — shared S3-backed cache, à la Bazel.
-- **Native image** — first-class GraalVM support.
 - **Kotlin / Scala** — second-class but workable, via the existing toolchain hook.
-- **`jet doctor`** — diagnose project misconfigurations.
 
 ## Open questions
 

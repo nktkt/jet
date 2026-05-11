@@ -4,6 +4,51 @@ All notable changes to `jet` are documented here. The format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). jet adheres to
 [Semantic Versioning](https://semver.org/) from `1.0.0` onward.
 
+## [1.5.0] — 2026-05-11
+
+### Added
+
+- **`jet outdated`** — checks every `[dependencies]` and
+  `[dev-dependencies]` entry against the Maven Central Solr search
+  endpoint (`https://search.maven.org/solrsearch/select`) and prints
+  the deltas:
+  ```
+    com.google.guava:guava : 33.0.0-jre → 33.4.8-jre  [dependencies]
+    org.junit.jupiter:junit-jupiter : 5.10.0 → 5.13.0-M3  [dev-dependencies]
+
+  2 updates available. Run `jet update` to apply.
+  ```
+  Path deps and workspace-inherited deps (`dep.workspace = true`) are
+  skipped because `jet update` can't own their version here. The
+  command is informational only — exits 0 even when updates exist.
+
+- **`jet update [coord]`** — bumps `jet.toml` in place to the latest
+  Maven Central version, preserving comments and formatting via
+  `toml_edit`. With no argument: every dep gets considered. With
+  `group:artifact` (or `group:artifact:version` — the version is
+  ignored): only that one. After the rewrite, `do_build` runs with
+  `force_resolve = true` so `jet.lock` is regenerated against the
+  new pins. If nothing actually changed, the lockfile rebuild is
+  skipped.
+
+- New `src/registry.rs` module exposes `latest_version(group,
+  artifact)` (HTTP GET against the Solr endpoint, parses
+  `response.docs[0].latestVersion`) and `is_newer(a, b)` (segment-wise
+  version comparator — numeric segments compared numerically, others
+  lexicographically). 6 new unit tests.
+
+### Known limitations
+
+- Maven Central's `latestVersion` field reports the newest published
+  version of a coordinate, which can be a milestone or release-
+  candidate (e.g. `5.13.0-M3` for `junit-jupiter`). For now, `jet
+  outdated` and `jet update` surface those as-is. A future minor will
+  add an `--allow-prereleases` opt-in (default = stable-only).
+- Workspace updates iterate only the manifest in CWD; for multi-member
+  workspaces, run `jet update` per member or at the workspace root
+  (only the root's own deps get bumped). Cross-member sweep is on the
+  roadmap for `1.6.x`.
+
 ## [1.4.0] — 2026-05-11
 
 ### Added

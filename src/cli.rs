@@ -167,4 +167,12 @@ pub enum Command {
         #[arg(long)]
         no_sign: bool,
     },
+    /// Check Maven Central for newer dependency versions
+    Outdated,
+    /// Bump dependencies to their latest Maven Central version
+    Update {
+        /// `group:artifact` (or `group:artifact:version`) to restrict the
+        /// update to a single dep. Omit to update every dep in jet.toml.
+        coord: Option<String>,
+    },
 }
